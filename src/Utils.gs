@@ -4,9 +4,106 @@
 // Use 5 minutes of Apps Script's default 6-minute execution limit.
 const EXECUTION_TIMEOUT_MS = 300000;
 const EXECUTION_START_MS = Date.now();
+const CALENDAR_LIST_MAX_RESULTS = 250;
 
 function hasExecutionTimeRemainingMs(minimumRemainingMs) {
   return Date.now() - EXECUTION_START_MS < EXECUTION_TIMEOUT_MS - (minimumRemainingMs || 0);
+}
+
+/**
+ * Resolve configured calendar references to Calendar API IDs using the user's
+ * current calendar list. A config reference may match either a calendar ID or
+ * the effective display name (summaryOverride when present, otherwise summary).
+ *
+ * @param {Object[]} calendarConfig - The configured source/destination mappings
+ * @return {Object[]} Cloned mappings with resolved sourceCalendarId/destinationCalendarId fields
+ */
+function resolveCalendarConfig(calendarConfig) {
+  const calendarLookup = buildCalendarLookup();
+
+  return calendarConfig.map(function(config) {
+    return Object.assign({}, config, {
+      sourceCalendarId: resolveCalendarReference(config.source, calendarLookup),
+      destinationCalendarId: resolveCalendarReference(config.destination, calendarLookup)
+    });
+  });
+}
+
+/**
+ * Build lookup tables from the user's calendar list.
+ *
+ * @return {Object} Lookup tables keyed by ID and effective display name
+ */
+function buildCalendarLookup() {
+  const byId = {};
+  const byName = {};
+  let pageToken = null;
+
+  do {
+    const response = Calendar.CalendarList.list({
+      showHidden: true,
+      maxResults: CALENDAR_LIST_MAX_RESULTS,
+      pageToken: pageToken
+    });
+    const items = response.items || [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      byId[item.id] = item.id;
+
+      const displayName = getCalendarDisplayName(item);
+      if (!byName[displayName]) {
+        byName[displayName] = [];
+      }
+      byName[displayName].push(item.id);
+    }
+
+    pageToken = response.nextPageToken;
+  } while (pageToken);
+
+  return {
+    byId: byId,
+    byName: byName
+  };
+}
+
+/**
+ * Return the effective configured display name for a calendar list item.
+ *
+ * @param {Object} calendarListItem - A CalendarList entry
+ * @return {string} summaryOverride when present, otherwise summary
+ */
+function getCalendarDisplayName(calendarListItem) {
+  return calendarListItem.summaryOverride || calendarListItem.summary || '';
+}
+
+/**
+ * Resolve a configured source/destination reference to a calendar ID.
+ *
+ * @param {string} calendarReference - A configured calendar name or ID
+ * @param {Object} calendarLookup - Lookup tables from buildCalendarLookup()
+ * @return {string} The resolved calendar ID
+ */
+function resolveCalendarReference(calendarReference, calendarLookup) {
+  if (calendarLookup.byId[calendarReference]) {
+    return calendarReference;
+  }
+
+  const matchingIds = calendarLookup.byName[calendarReference];
+  if (!matchingIds || matchingIds.length === 0) {
+    throw new Error('Calendar "' + calendarReference + '" was not found in CalendarList');
+  }
+
+  if (matchingIds.length > 1) {
+    throw new Error(
+      'Calendar "' +
+      calendarReference +
+      '" is ambiguous; matching IDs: ' +
+      matchingIds.join(', ')
+    );
+  }
+
+  return matchingIds[0];
 }
 
 /**

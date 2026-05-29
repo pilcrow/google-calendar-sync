@@ -18,14 +18,21 @@ function orchestrateCalendarSync() {
     }
     
     Logger.log('Starting calendar sync orchestration');
+
+    if (CALENDAR_CONFIG.length === 0) {
+      Logger.log('No calendar mappings configured');
+      return;
+    }
+
+    const resolvedCalendarConfig = resolveCalendarConfig(CALENDAR_CONFIG);
     
-    for (let i = 0; i < CALENDAR_CONFIG.length; i++) {
+    for (let i = 0; i < resolvedCalendarConfig.length; i++) {
       if (!hasExecutionTimeRemainingMs()) {
         Logger.log('Execution timeout reached - stopping');
         break;
       }
       
-      const config = CALENDAR_CONFIG[i];
+      const config = resolvedCalendarConfig[i];
       
       try {
         syncCalendarPair(config);
@@ -49,10 +56,20 @@ function orchestrateCalendarSync() {
  * @param {Object} config - The calendar configuration object
  */
 function syncCalendarPair(config) {
-  const sourceCalendarId = config.source;
-  const destCalendarId = config.destination;
+  const sourceCalendarId = config.sourceCalendarId;
+  const destCalendarId = config.destinationCalendarId;
   
-  Logger.log('Syncing: ' + sourceCalendarId + ' -> ' + destCalendarId);
+  Logger.log(
+    'Syncing: ' +
+    config.source +
+    ' (' +
+    sourceCalendarId +
+    ') -> ' +
+    config.destination +
+    ' (' +
+    destCalendarId +
+    ')'
+  );
   
   const configChanged = checkConfigChange();
   const syncToken = getSyncToken(sourceCalendarId);
