@@ -1,0 +1,30 @@
+// vim: set ft=javascript ts=2 sw=2 et:
+// Example sync configuration.
+// Each mapping names a source calendar, a destination calendar, and optional
+// ordered rules. The first matching rule wins. If no rule matches, the event
+// keeps its original summary and imports unchanged.
+//
+// Google Calendar colorId reference:
+// 1  (#a4bdfc) Lavender / Pale Blue
+// 2  (#7ae7bf) Sage / Light Green
+// 3  (#dbadff) Grape / Mauve
+// 4  (#ff887c) Flamingo / Pale Red
+// 5  (#fbd75b) Banana / Yellow
+// 6  (#ffb878) Tangerine / Orange
+// 7  (#46d6db) Peacock / Cyan
+// 8  (#e1e1e1) Graphite / Light Gray
+// 9  (#5484ed) Blueberry / Blue
+// 10 (#51b749) Basil / Green
+// 11 (#dc2127) Tomato / Bold Red
+
+const CALENDAR_CONFIG = [
+  {
+    source: 'sports Calendar',
+    destination: 'TEST',
+    rules: [
+      { match: /\bHigh School\b/i, prefix: 'Abby: ', colorId: 5 },
+      { match: /\bMiddle School\b/i, prefix: 'Bob: ', colorId: 1 },
+      { skip: true }
+    ],
+  },
+];
