@@ -55,8 +55,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
     Logger.log('Updated event: ' + destEvent.summary);
   } catch (e) {
     if (isHttpError(e, 404, 'Not Found')) {
-      destEvent.id = destEventId;
-      Calendar.Events.insert(destEvent, destCalendarId);
+      Calendar.Events.insert(buildInsertDestinationEvent(destEvent, destEventId), destCalendarId);
       Logger.log('Inserted event: ' + destEvent.summary);
     } else {
       throw e;
@@ -65,8 +64,8 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
 }
 
 /**
- * Build a destination event payload from source event and rule results.
- * Handles recurring events (master and exception) properly.
+ * Build a write-safe destination event payload from source event and rule results.
+ * Only allowlisted fields are included in outbound insert/update requests.
  * 
  * @param {Object} sourceEvent - The source calendar event
  * @param {string} sourceCalendarId - The source calendar identifier
@@ -76,12 +75,6 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
 function buildDestinationEvent(sourceEvent, sourceCalendarId, ruleResult) {
   const destEvent = {
     summary: (ruleResult.prefix || '') + (sourceEvent.summary || ''),
-    description: sourceEvent.description,
-    location: sourceEvent.location,
-    start: sourceEvent.start,
-    end: sourceEvent.end,
-    transparency: sourceEvent.transparency,
-    visibility: sourceEvent.visibility,
     extendedProperties: {
       private: {
         sourceCalendarId: sourceCalendarId,
@@ -89,24 +82,43 @@ function buildDestinationEvent(sourceEvent, sourceCalendarId, ruleResult) {
       }
     }
   };
-  
-  if (ruleResult.colorId) {
-    destEvent.colorId = ruleResult.colorId;
-  }
-  
+
+  addWritableEventField(destEvent, 'description', sourceEvent.description);
+  addWritableEventField(destEvent, 'location', sourceEvent.location);
+  addWritableEventField(destEvent, 'start', buildWritableEventTime(sourceEvent.start));
+  addWritableEventField(destEvent, 'end', buildWritableEventTime(sourceEvent.end));
+  addWritableEventField(destEvent, 'transparency', sourceEvent.transparency);
+  addWritableEventField(destEvent, 'visibility', sourceEvent.visibility);
+  addWritableEventField(destEvent, 'colorId', ruleResult.colorId);
+
   if (sourceEvent.recurrence) {
-    destEvent.recurrence = sourceEvent.recurrence;
+    destEvent.recurrence = sourceEvent.recurrence.slice();
   }
-  
-  if (sourceEvent.recurringEventId) {
-    destEvent.recurringEventId = getDestinationEventId(
-      sourceCalendarId,
-      sourceEvent.recurringEventId
-    );
-    destEvent.originalStartTime = sourceEvent.originalStartTime;
-  }
-  
+
   return destEvent;
+}
+
+function addWritableEventField(destEvent, fieldName, value) {
+  if (value !== undefined && value !== null) {
+    destEvent[fieldName] = value;
+  }
+}
+
+function buildWritableEventTime(eventTime) {
+  if (!eventTime) {
+    return null;
+  }
+
+  const writableEventTime = {};
+  addWritableEventField(writableEventTime, 'date', eventTime.date);
+  addWritableEventField(writableEventTime, 'dateTime', eventTime.dateTime);
+  addWritableEventField(writableEventTime, 'timeZone', eventTime.timeZone);
+
+  return Object.keys(writableEventTime).length > 0 ? writableEventTime : null;
+}
+
+function buildInsertDestinationEvent(destEvent, destEventId) {
+  return Object.assign({ id: destEventId }, destEvent);
 }
 
 /**
