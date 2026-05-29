@@ -20,13 +20,31 @@ function hasExecutionTimeRemainingMs(minimumRemainingMs) {
  */
 function resolveCalendarConfig(calendarConfig) {
   const calendarLookup = buildCalendarLookup();
+  const resolvedCalendarConfig = [];
 
-  return calendarConfig.map(function(config) {
-    return Object.assign({}, config, {
-      sourceCalendarId: resolveCalendarReference(config.source, calendarLookup),
-      destinationCalendarId: resolveCalendarReference(config.destination, calendarLookup)
-    });
-  });
+  for (let i = 0; i < calendarConfig.length; i++) {
+    const config = calendarConfig[i];
+
+    try {
+      resolvedCalendarConfig.push(
+        Object.assign({}, config, {
+          sourceCalendarId: resolveCalendarReference(config.source, calendarLookup),
+          destinationCalendarId: resolveCalendarReference(config.destination, calendarLookup)
+        })
+      );
+    } catch (e) {
+      Logger.log(
+        'Skipping calendar pair "' +
+        config.source +
+        '" -> "' +
+        config.destination +
+        '" because one or both calendars could not be resolved: ' +
+        e.message
+      );
+    }
+  }
+
+  return resolvedCalendarConfig;
 }
 
 /**
