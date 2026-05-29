@@ -116,8 +116,9 @@ function buildDestinationEvent(sourceEvent, sourceCalendarId, ruleResult) {
  * @param {string} sourceCalendarId - The source calendar identifier
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
+ * @param {number} startTime - The orchestration start timestamp for timeout checks
  */
-function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
+function executeReconciliationSync(sourceCalendarId, destCalendarId, config, startTime) {
   Logger.log('Starting reconciliation sync for ' + sourceCalendarId);
   
   const allowedSet = new Set();
@@ -126,6 +127,11 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   
   let pageToken = null;
   do {
+    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+      Logger.log('Execution timeout reached during reconciliation - stopping');
+      return;
+    }
+
     const response = Calendar.Events.list(sourceCalendarId, {
       timeMin: lookbackTime.toISOString(),
       singleEvents: false,
@@ -160,6 +166,11 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   
   pageToken = null;
   do {
+    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+      Logger.log('Execution timeout reached during reconciliation - stopping');
+      return;
+    }
+
     const response = Calendar.Events.list(destCalendarId, {
       privateExtendedProperty: 'sourceCalendarId=' + sourceCalendarId,
       maxResults: MAX_RESULTS_PER_PAGE,
@@ -185,7 +196,13 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   } while (pageToken);
   
   pageToken = null;
+  let newSyncToken = null;
   do {
+    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+      Logger.log('Execution timeout reached during reconciliation - stopping');
+      return;
+    }
+
     const response = Calendar.Events.list(sourceCalendarId, {
       timeMin: lookbackTime.toISOString(),
       singleEvents: false,
@@ -201,7 +218,17 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     }
     
     pageToken = response.nextPageToken;
+
+    if (response.nextSyncToken) {
+      newSyncToken = response.nextSyncToken;
+    }
   } while (pageToken);
+
+  if (newSyncToken) {
+    setSyncToken(sourceCalendarId, newSyncToken);
+    setConfigHash(generateMd5Hash(JSON.stringify(CALENDAR_CONFIG)));
+    Logger.log('Saved new sync token after reconciliation');
+  }
   
   Logger.log('Reconciliation sync complete');
 }

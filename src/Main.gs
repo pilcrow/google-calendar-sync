@@ -62,13 +62,7 @@ function syncCalendarPair(config, startTime) {
   
   if (configChanged && syncToken) {
     Logger.log('Config changed - triggering reconciliation sync');
-    executeReconciliationSync(sourceCalendarId, destCalendarId, config);
-    
-    const currentConfigJson = JSON.stringify(CALENDAR_CONFIG);
-    const currentHash = generateMd5Hash(currentConfigJson);
-    setConfigHash(currentHash);
-    
-    performIncrementalSync(sourceCalendarId, destCalendarId, config, null, startTime);
+    executeReconciliationSync(sourceCalendarId, destCalendarId, config, startTime);
     return;
   }
   
@@ -77,8 +71,7 @@ function syncCalendarPair(config, startTime) {
   } catch (e) {
     if (e.message.indexOf('410') !== -1 || e.message.indexOf('Gone') !== -1) {
       Logger.log('Sync token expired (410 Gone) - triggering reconciliation sync');
-      executeReconciliationSync(sourceCalendarId, destCalendarId, config);
-      performIncrementalSync(sourceCalendarId, destCalendarId, config, null, startTime);
+      executeReconciliationSync(sourceCalendarId, destCalendarId, config, startTime);
     } else {
       throw e;
     }

@@ -45,7 +45,7 @@ function generateMd5Hash(text) {
 }
 
 /**
- * Get a sync token from script properties for a specific source calendar.
+ * Get a sync token from user properties for a specific source calendar.
  * 
  * @param {string} sourceCalendarId - The source calendar identifier
  * @return {string|null} The stored sync token, or null if not found
@@ -57,7 +57,7 @@ function getSyncToken(sourceCalendarId) {
 }
 
 /**
- * Store a sync token in script properties for a specific source calendar.
+ * Store a sync token in user properties for a specific source calendar.
  * 
  * @param {string} sourceCalendarId - The source calendar identifier
  * @param {string} syncToken - The sync token to store
@@ -69,7 +69,7 @@ function setSyncToken(sourceCalendarId, syncToken) {
 }
 
 /**
- * Get the stored configuration hash from script properties.
+ * Get the stored configuration hash from user properties.
  * 
  * @return {string|null} The stored config hash, or null if not found
  */
@@ -79,7 +79,7 @@ function getConfigHash() {
 }
 
 /**
- * Store the configuration hash in script properties.
+ * Store the configuration hash in user properties.
  * 
  * @param {string} hash - The MD5 hash of the current configuration
  */

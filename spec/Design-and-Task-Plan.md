@@ -26,10 +26,10 @@ To conserve API quotas and performance, it relies on incremental sync states (`s
 
 ### A. Deterministic Event ID Mapping
 
-To avoid slow database searches, all destination event IDs must be computed deterministically from the source event ID.
+To avoid slow database searches, all destination event IDs must be computed deterministically from both the source calendar ID and the source event ID.
 
 * **Google Event ID Constraint (Base32hex):** Target IDs must match regex `^[a-v0-9]+$`. No capitals, symbols, hyphens, or characters past `v`.
-* **Algorithm:** `destId = "src" + sourceEventId.toLowerCase().replace(/[^a-v0-9]/g, "")`
+* **Algorithm:** `destId = "gcs" + md5(sourceCalendarId + "::" + sourceEventId)`
 
 ### B. State Tracking via Private Extended Attributes
 
@@ -40,7 +40,7 @@ Every event written to the destination calendar must embed metadata in its `exte
 
 ### C. Persistent Storage Configuration
 
-Using `PropertiesService.getScriptProperties()`, track the following keys:
+Using `PropertiesService.getUserProperties()`, track the following keys:
 
 * `SYNC_TOKEN_[Encoded_Source_Calendar_Id]`: The string `nextSyncToken` returned by Google.
 * `CONFIG_HASH`: An MD5 digest text hash of the structural configurations to automatically identify rule modifications.
@@ -82,7 +82,7 @@ For each source calendar event processed inside the sync payload:
 
 3. **Handle Recurring Architecture (`singleEvents: false`):**
 * **Master Event:** If `item.recurrence` exists, map the array directly to the destination payload object.
-* **Exception Event:** If `item.recurringEventId` exists, remap the pointer to the destination parent space: `destEvent.recurringEventId = "src" + item.recurringEventId.toLowerCase().replace(/[^a-v0-9]/g, "")`. Map the original `item.originalStartTime`.
+* **Exception Event:** If `item.recurringEventId` exists, remap the pointer to the destination parent space with the same deterministic ID function used for normal event IDs. Map the original `item.originalStartTime`.
 
 
 4. **Upsert Execution:** Attempt a `Calendar.Events.get(destCalendarId, destId)`. On success, execute `update()`; on a caught `404 Not Found` error, execute `insert()`.
@@ -92,11 +92,12 @@ For each source calendar event processed inside the sync payload:
 If an execution encounters an **`HTTP 410 Gone`** error (expired sync token) OR if `checkConfigChange()` yields true:
 
 1. Do **not** perform a destructive wipe of the destination calendar.
-2. Call `Calendar.Events.list()` on the source calendar for `[now - 7d, inf)` *without* a token. Pass each event's summary through the rule engine. If it passes (not skipped), add its deterministic target ID to an in-memory `AllowedSet`.
-3. Query the destination calendar for all events containing the specific `extendedProperties.private.sourceCalendarId`.
-4. Loop through those destination results: If a destination event's ID is **not** present in your `AllowedSet`, it represents a ghost event that was deleted or skipped while the pipeline was blind. Instantly execute `Calendar.Events.remove()`.
-5. For all items remaining inside `AllowedSet`, execute a standard upsert pass to update timestamps/text content.
-6. Commit the fresh `nextSyncToken` to the persistent properties database.
+2. Treat the tokenless `[now - 7d, inf)` sync as the baseline subset behavior; reconciliation adds destination cleanup on top of that baseline.
+3. Call `Calendar.Events.list()` on the source calendar for `[now - 7d, inf)` *without* a token. Pass each event's summary through the rule engine. If it passes (not skipped), add its deterministic target ID to an in-memory `AllowedSet`.
+4. Query the destination calendar for all events containing the specific `extendedProperties.private.sourceCalendarId`.
+5. Loop through those destination results: If a destination event's ID is **not** present in your `AllowedSet`, it represents a ghost event that was deleted or skipped while the pipeline was blind. Execute `Calendar.Events.remove()`.
+6. Perform a second tokenless source traversal over the same `[now - 7d, inf)` window and execute the standard upsert pass for the surviving source events.
+7. Capture and persist the fresh `nextSyncToken` from that final traversal. Do **not** run a second tokenless sync after reconciliation completes.
 
 ### C. Concurrency and Timeout Defense
 
@@ -116,18 +117,18 @@ If an execution encounters an **`HTTP 410 Gone`** error (expired sync token) OR 
 
 ### Phase 2: Core ID and Rule Utility Engines
 
-* [ ] Code `getDeterministicId(sourceId)` ensuring character sanitization strictly adheres to the `^[a-v0-9]+$` base32hex restriction.
+* [ ] Code `getDestinationEventId(sourceCalendarId, sourceEventId)` using an MD5 hash of both identifiers and a `gcs` prefix.
 * [ ] Code `evaluateRules(summary, rules)` which takes the event summary string (defaulting to `''` if null), iterates through the array rules, evaluates the regex parameters, and returns an object detailing actions (`skip`, `prefix`, `colorId`).
 
 ### Phase 3: Token State and Time Management
 
 * [ ] Code `checkConfigChange()` to evaluate the current configuration state against the stored configuration hash property, returning a boolean indicator.
-* [ ] Write helper functions to handle getting and setting `SYNC_TOKEN_[ID]` values inside the script property database.
+* [ ] Write helper functions to handle getting and setting `SYNC_TOKEN_[ID]` values inside the user properties database.
 
 ### Phase 4: Core Sync and Reconciliation Operations
 
 * [ ] Code `processEventPayload(item, config, destCalendarId)` implementing the core sync logic (handling cancellations, running summary rules, mapping master rules, remapping exception parents, and executing `get` $\rightarrow$ `update`/`insert`).
-* [ ] Code the `executeReconciliationSync(sourceId, destId, config)` function to manage the in-memory array differential logic when a token is invalidated or rules are modified, ensuring skipped rules are factored out of the `AllowedSet`.
+* [ ] Code the `executeReconciliationSync(sourceId, destId, config)` function to manage the in-memory array differential logic when a token is invalidated or rules are modified, ensure skipped rules are factored out of the `AllowedSet`, and persist the fresh `nextSyncToken` from the reconciliation pass itself.
 
 ### Phase 5: Execution Orchestration and Trigger Deployment
 
