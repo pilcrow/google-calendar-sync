@@ -110,9 +110,71 @@ function buildDestinationEvent(sourceEvent, sourceCalendarId, ruleResult) {
 }
 
 /**
+ * @return {string} ISO timestamp for the tokenless sync window start.
+ */
+function getSyncWindowTimeMin() {
+  const lookbackTime = new Date();
+  lookbackTime.setDate(lookbackTime.getDate() - LOOKBACK_DAYS);
+  return lookbackTime.toISOString();
+}
+
+/**
+ * Sync the full tokenless source window and persist a fresh sync token.
+ *
+ * @param {string} sourceCalendarId - The source calendar identifier
+ * @param {string} destCalendarId - The destination calendar identifier
+ * @param {Object} config - The configuration object with rules
+ * @param {number} startTime - The orchestration start timestamp for timeout checks
+ * @param {string=} timeMin - Optional ISO timestamp overriding the default sync window start
+ */
+function syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime, timeMin) {
+  const requestParams = {
+    timeMin: timeMin || getSyncWindowTimeMin(),
+    singleEvents: false,
+    maxResults: MAX_RESULTS_PER_PAGE
+  };
+  let pageToken = null;
+  let newSyncToken = null;
+
+  do {
+    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+      Logger.log('Execution timeout reached during sync - stopping');
+      return;
+    }
+
+    if (pageToken) {
+      requestParams.pageToken = pageToken;
+    } else {
+      delete requestParams.pageToken;
+    }
+
+    const response = Calendar.Events.list(sourceCalendarId, requestParams);
+
+    if (response.items) {
+      for (let i = 0; i < response.items.length; i++) {
+        const item = response.items[i];
+        processSyncItem(item, sourceCalendarId, destCalendarId, config);
+      }
+    }
+
+    pageToken = response.nextPageToken;
+
+    if (response.nextSyncToken) {
+      newSyncToken = response.nextSyncToken;
+    }
+  } while (pageToken);
+
+  if (newSyncToken) {
+    setSyncToken(sourceCalendarId, newSyncToken);
+    setConfigHash(generateMd5Hash(JSON.stringify(CALENDAR_CONFIG)));
+    Logger.log('Saved new sync token');
+  }
+}
+
+/**
  * Execute reconciliation sync when sync token expires or config changes.
  * Builds AllowedSet of events that pass current rules and removes orphaned events.
- * 
+ *
  * @param {string} sourceCalendarId - The source calendar identifier
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
@@ -122,8 +184,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config, sta
   Logger.log('Starting reconciliation sync for ' + sourceCalendarId);
   
   const allowedSet = new Set();
-  const lookbackTime = new Date();
-  lookbackTime.setDate(lookbackTime.getDate() - LOOKBACK_DAYS);
+  const timeMin = getSyncWindowTimeMin();
   
   let pageToken = null;
   do {
@@ -133,7 +194,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config, sta
     }
 
     const response = Calendar.Events.list(sourceCalendarId, {
-      timeMin: lookbackTime.toISOString(),
+      timeMin: timeMin,
       singleEvents: false,
       maxResults: MAX_RESULTS_PER_PAGE,
       pageToken: pageToken
@@ -194,41 +255,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config, sta
     
     pageToken = response.nextPageToken;
   } while (pageToken);
-  
-  pageToken = null;
-  let newSyncToken = null;
-  do {
-    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
-      Logger.log('Execution timeout reached during reconciliation - stopping');
-      return;
-    }
-
-    const response = Calendar.Events.list(sourceCalendarId, {
-      timeMin: lookbackTime.toISOString(),
-      singleEvents: false,
-      maxResults: MAX_RESULTS_PER_PAGE,
-      pageToken: pageToken
-    });
-    
-    if (response.items) {
-      for (let i = 0; i < response.items.length; i++) {
-        const item = response.items[i];
-        processSyncItem(item, sourceCalendarId, destCalendarId, config);
-      }
-    }
-    
-    pageToken = response.nextPageToken;
-
-    if (response.nextSyncToken) {
-      newSyncToken = response.nextSyncToken;
-    }
-  } while (pageToken);
-
-  if (newSyncToken) {
-    setSyncToken(sourceCalendarId, newSyncToken);
-    setConfigHash(generateMd5Hash(JSON.stringify(CALENDAR_CONFIG)));
-    Logger.log('Saved new sync token after reconciliation');
-  }
+  syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime, timeMin);
   
   Logger.log('Reconciliation sync complete');
 }

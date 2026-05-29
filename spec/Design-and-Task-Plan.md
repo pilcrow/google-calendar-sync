@@ -96,7 +96,7 @@ If an execution encounters an **`HTTP 410 Gone`** error (expired sync token) OR 
 3. Call `Calendar.Events.list()` on the source calendar for `[now - 7d, inf)` *without* a token. Pass each event's summary through the rule engine. If it passes (not skipped), add its deterministic target ID to an in-memory `AllowedSet`.
 4. Query the destination calendar for all events containing the specific `extendedProperties.private.sourceCalendarId`.
 5. Loop through those destination results: If a destination event's ID is **not** present in your `AllowedSet`, it represents a ghost event that was deleted or skipped while the pipeline was blind. Execute `Calendar.Events.remove()`.
-6. Perform a second tokenless source traversal over the same `[now - 7d, inf)` window and execute the standard upsert pass for the surviving source events.
+6. Perform the same tokenless source-window sync used by the no-token baseline path over `[now - 7d, inf)` and execute the standard upsert pass for the surviving source events.
 7. Capture and persist the fresh `nextSyncToken` from that final traversal. Do **not** run a second tokenless sync after reconciliation completes.
 
 ### C. Concurrency and Timeout Defense

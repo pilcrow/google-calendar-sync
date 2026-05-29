@@ -79,28 +79,25 @@ function syncCalendarPair(config, startTime) {
 }
 
 /**
- * Perform incremental sync using syncToken or full sync if no token exists.
+ * Perform incremental sync using syncToken or a shared tokenless source-window sync.
  * 
  * @param {string} sourceCalendarId - The source calendar identifier
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The calendar configuration object
- * @param {string|null} syncToken - The sync token, or null for full sync
+ * @param {string|null} syncToken - The sync token, or null for tokenless source-window sync
  * @param {number} startTime - The orchestration start timestamp for timeout checks
  */
 function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncToken, startTime) {
+  if (!syncToken) {
+    syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime);
+    return;
+  }
+
   const requestParams = {
+    syncToken: syncToken,
     singleEvents: false,
     maxResults: MAX_RESULTS_PER_PAGE
   };
-  
-  if (syncToken) {
-    requestParams.syncToken = syncToken;
-  } else {
-    const lookbackTime = new Date();
-    lookbackTime.setDate(lookbackTime.getDate() - LOOKBACK_DAYS);
-    requestParams.timeMin = lookbackTime.toISOString();
-  }
-  
   let pageToken = null;
   let newSyncToken = null;
   
@@ -134,12 +131,5 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   if (newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
     Logger.log('Saved new sync token');
-  }
-  
-  if (!syncToken) {
-    const currentConfigJson = JSON.stringify(CALENDAR_CONFIG);
-    const currentHash = generateMd5Hash(currentConfigJson);
-    setConfigHash(currentHash);
-    Logger.log('Saved config hash');
   }
 }
