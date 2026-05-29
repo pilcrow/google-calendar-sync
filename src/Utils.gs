@@ -1,5 +1,12 @@
 // vim: set ft=javascript ts=2 sw=2 et:
-// Utility functions for deterministic ID generation, MD5 hashing, and properties access
+// Utility functions for deterministic ID generation, execution timing, and properties access
+
+const EXECUTION_TIMEOUT_MS = 300000;
+const EXECUTION_START_MS = Date.now();
+
+function hasExecutionTimeRemainingMs(minimumRemainingMs) {
+  return Date.now() - EXECUTION_START_MS < EXECUTION_TIMEOUT_MS - (minimumRemainingMs || 0);
+}
 
 /**
  * Generate a deterministic destination event ID from source calendar and event IDs.

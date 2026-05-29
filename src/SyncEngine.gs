@@ -124,10 +124,9 @@ function getSyncWindowTimeMin() {
  * @param {string} sourceCalendarId - The source calendar identifier
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
- * @param {number} startTime - The orchestration start timestamp for timeout checks
  * @param {string=} timeMin - Optional ISO timestamp overriding the default sync window start
  */
-function syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime, timeMin) {
+function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   const requestParams = {
     timeMin: timeMin || getSyncWindowTimeMin(),
     singleEvents: false,
@@ -137,7 +136,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime, t
   let newSyncToken = null;
 
   do {
-    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+    if (!hasExecutionTimeRemainingMs()) {
       Logger.log('Execution timeout reached during sync - stopping');
       return;
     }
@@ -178,9 +177,8 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime, t
  * @param {string} sourceCalendarId - The source calendar identifier
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
- * @param {number} startTime - The orchestration start timestamp for timeout checks
  */
-function executeReconciliationSync(sourceCalendarId, destCalendarId, config, startTime) {
+function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   Logger.log('Starting reconciliation sync for ' + sourceCalendarId);
   
   const allowedSet = new Set();
@@ -188,7 +186,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config, sta
   
   let pageToken = null;
   do {
-    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+    if (!hasExecutionTimeRemainingMs()) {
       Logger.log('Execution timeout reached during reconciliation - stopping');
       return;
     }
@@ -227,7 +225,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config, sta
   
   pageToken = null;
   do {
-    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+    if (!hasExecutionTimeRemainingMs()) {
       Logger.log('Execution timeout reached during reconciliation - stopping');
       return;
     }
@@ -255,7 +253,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config, sta
     
     pageToken = response.nextPageToken;
   } while (pageToken);
-  syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime, timeMin);
+  syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin);
   
   Logger.log('Reconciliation sync complete');
 }

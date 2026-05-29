@@ -1,7 +1,6 @@
 // vim: set ft=javascript ts=2 sw=2 et:
 // Main orchestration entry point for calendar synchronization
 
-const EXECUTION_TIMEOUT_MS = 300000;
 const LOCK_TIMEOUT_MS = 30000;
 
 /**
@@ -18,11 +17,10 @@ function orchestrateCalendarSync() {
       return;
     }
     
-    const startTime = new Date().getTime();
     Logger.log('Starting calendar sync orchestration');
     
     for (let i = 0; i < CALENDAR_CONFIG.length; i++) {
-      if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+      if (!hasExecutionTimeRemainingMs()) {
         Logger.log('Execution timeout reached - stopping');
         break;
       }
@@ -30,7 +28,7 @@ function orchestrateCalendarSync() {
       const config = CALENDAR_CONFIG[i];
       
       try {
-        syncCalendarPair(config, startTime);
+        syncCalendarPair(config);
       } catch (e) {
         Logger.log('Error syncing calendar pair: ' + e.message);
         Logger.log(e.stack);
@@ -49,9 +47,8 @@ function orchestrateCalendarSync() {
  * Handles incremental sync with tokens or falls back to reconciliation on errors.
  * 
  * @param {Object} config - The calendar configuration object
- * @param {number} startTime - The orchestration start timestamp for timeout checks
  */
-function syncCalendarPair(config, startTime) {
+function syncCalendarPair(config) {
   const sourceCalendarId = config.source;
   const destCalendarId = config.destination;
   
@@ -62,16 +59,16 @@ function syncCalendarPair(config, startTime) {
   
   if (configChanged && syncToken) {
     Logger.log('Config changed - triggering reconciliation sync');
-    executeReconciliationSync(sourceCalendarId, destCalendarId, config, startTime);
+    executeReconciliationSync(sourceCalendarId, destCalendarId, config);
     return;
   }
   
   try {
-    performIncrementalSync(sourceCalendarId, destCalendarId, config, syncToken, startTime);
+    performIncrementalSync(sourceCalendarId, destCalendarId, config, syncToken);
   } catch (e) {
     if (e.message.indexOf('410') !== -1 || e.message.indexOf('Gone') !== -1) {
       Logger.log('Sync token expired (410 Gone) - triggering reconciliation sync');
-      executeReconciliationSync(sourceCalendarId, destCalendarId, config, startTime);
+      executeReconciliationSync(sourceCalendarId, destCalendarId, config);
     } else {
       throw e;
     }
@@ -85,11 +82,10 @@ function syncCalendarPair(config, startTime) {
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The calendar configuration object
  * @param {string|null} syncToken - The sync token, or null for tokenless source-window sync
- * @param {number} startTime - The orchestration start timestamp for timeout checks
  */
-function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncToken, startTime) {
+function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncToken) {
   if (!syncToken) {
-    syncSourceWindow(sourceCalendarId, destCalendarId, config, startTime);
+    syncSourceWindow(sourceCalendarId, destCalendarId, config);
     return;
   }
 
@@ -102,7 +98,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   let newSyncToken = null;
   
   do {
-    if (new Date().getTime() - startTime > EXECUTION_TIMEOUT_MS) {
+    if (!hasExecutionTimeRemainingMs()) {
       Logger.log('Execution timeout reached during sync - stopping');
       break;
     }
