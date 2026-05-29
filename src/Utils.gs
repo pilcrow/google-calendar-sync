@@ -1,6 +1,7 @@
 // vim: set ft=javascript ts=2 sw=2 et:
 // Utility functions for deterministic ID generation, execution timing, and properties access
 
+// Use 5 minutes of Apps Script's default 6-minute execution limit.
 const EXECUTION_TIMEOUT_MS = 300000;
 const EXECUTION_START_MS = Date.now();
 
