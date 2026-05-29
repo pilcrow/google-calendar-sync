@@ -124,6 +124,16 @@ function resolveCalendarReference(calendarReference, calendarLookup) {
   return matchingIds[0];
 }
 
+function isHttpError(error, statusCode, fallbackText) {
+  const message = String((error && (error.message || error)) || '');
+  const statusPattern = new RegExp('\\b' + String(statusCode) + '\\b');
+
+  return (
+    statusPattern.test(message) ||
+    (fallbackText && new RegExp(fallbackText, 'i').test(message))
+  );
+}
+
 /**
  * Generate a deterministic destination event ID from source calendar and event IDs.
  * Uses MD5 hash of the concatenation to ensure global uniqueness across all source calendars.

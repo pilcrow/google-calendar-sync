@@ -83,7 +83,7 @@ function syncCalendarPair(config) {
   try {
     performIncrementalSync(sourceCalendarId, destCalendarId, config, syncToken);
   } catch (e) {
-    if (e.message.indexOf('410') !== -1 || e.message.indexOf('Gone') !== -1) {
+    if (isHttpError(e, 410, 'Gone')) {
       Logger.log('Sync token expired (410 Gone) - triggering reconciliation sync');
       executeReconciliationSync(sourceCalendarId, destCalendarId, config);
     } else {

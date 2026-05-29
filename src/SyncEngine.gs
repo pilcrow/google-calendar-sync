@@ -26,7 +26,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
       Calendar.Events.remove(destCalendarId, destEventId);
       Logger.log('Removed cancelled event: ' + destEventId);
     } catch (e) {
-      if (e.message.indexOf('404') === -1) {
+      if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
       }
     }
@@ -40,7 +40,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
       Calendar.Events.remove(destCalendarId, destEventId);
       Logger.log('Removed skipped event: ' + item.summary);
     } catch (e) {
-      if (e.message.indexOf('404') === -1) {
+      if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
       }
     }
@@ -54,7 +54,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
     Calendar.Events.update(destEvent, destCalendarId, destEventId);
     Logger.log('Updated event: ' + destEvent.summary);
   } catch (e) {
-    if (e.message.indexOf('404') !== -1) {
+    if (isHttpError(e, 404, 'Not Found')) {
       destEvent.id = destEventId;
       Calendar.Events.insert(destEvent, destCalendarId);
       Logger.log('Inserted event: ' + destEvent.summary);
