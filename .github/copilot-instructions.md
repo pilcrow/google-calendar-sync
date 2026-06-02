@@ -24,7 +24,7 @@ The system uses a **hub-and-spoke architecture** where multiple source calendars
 ### Key Design Principles
 
 1. **Incremental Sync with Tokens**: Uses Google Calendar API v3's `syncToken` mechanism to avoid re-processing unchanged events
-2. **Deterministic ID Mapping**: Destination event IDs are computed from source IDs using the formula: `"src" + sourceId.toLowerCase().replace(/[^a-v0-9]/g, "")` to avoid database lookups
+2. **Deterministic ID Mapping**: Destination event IDs are computed as `"gcs" + md5(sourceCalendarId + "::" + sourceEventId)` to guarantee uniqueness across all source calendars
 3. **Recurring Event Preservation**: Must use `singleEvents: false` to preserve recurring event structure and enable `syncToken` support
 4. **Rule-Based Filtering**: Events are filtered and modified based on their summary text only
 
@@ -42,13 +42,25 @@ Apps Script loads `.gs` files alphabetically into a single global namespace. The
 
 **PropertiesService** stores:
 - `SYNC_TOKEN_[EncodedSourceCalendarId]`: Incremental sync tokens per source calendar
-- `CONFIG_HASH`: MD5 hash of configuration to detect rule changes
+- `CONFIG_HASH_[EncodedSourceCalendarId]_[EncodedDestCalendarId]`: Per-pair MD5 hash of `rules` to detect rule changes. Keys are encoded with `encodeURIComponent`. Hashing uses `normalizeConfigForHash` (RegExp→`toString()`, sorted object keys) before `JSON.stringify` — plain `JSON.stringify` silently ignores regex changes.
 
 **Extended Properties** on destination events store:
 - `extendedProperties.private.sourceCalendarId`: Origin calendar identifier
 - `extendedProperties.private.sourceEventId`: Original source event ID
 
-### Sync States
+### Calendar Reference Resolution
+
+The `source` and `destination` fields in `Config.gs` may be either a **calendar ID** or a **display name** (as shown in the Google Calendar UI, `summaryOverride` preferred over `summary`). Resolution happens at runtime via `CalendarList`:
+
+- If the reference matches a known calendar ID exactly, it is used as-is
+- If it matches exactly one display name, that calendar's ID is used
+- If it is ambiguous (multiple calendars share the name) or not found, the entire pair is **skipped with a `console.warn`** — the sync continues with remaining pairs
+
+### Sync Token Fan-Out Constraint
+
+Sync tokens are keyed by source calendar only (`SYNC_TOKEN_[encodedSourceCalendarId]`). **Syncing one source to multiple destinations is not supported and has not been analyzed.** It is unknown whether token consumption for one pair would corrupt incremental state for another pair sharing the same source. Do not configure the same source calendar in more than one `CALENDAR_CONFIG` entry until this is resolved.
+
+
 
 1. **Normal Incremental Sync**: Processes changes since last `syncToken`
 2. **Reconciliation Sync**: Triggered by `HTTP 410 Gone` (expired token) or config changes
@@ -61,10 +73,13 @@ Apps Script loads `.gs` files alphabetically into a single global namespace. The
 
 ### Event ID Constraints
 
-Google Calendar event IDs must match regex `^[a-v0-9]+$` (base32hex). The deterministic ID function must:
-- Prefix with `"src"`
-- Convert to lowercase
-- Strip all non-base32hex characters: `sourceId.toLowerCase().replace(/[^a-v0-9]/g, "")`
+Google Calendar event IDs must match regex `^[a-v0-9]+$` (base32hex). MD5 hex output (`[0-9a-f]`) is a strict subset of this charset. The deterministic ID function uses:
+
+```javascript
+"gcs" + md5(sourceCalendarId + "::" + sourceEventId)
+```
+
+This guarantees global uniqueness across all source calendars. Do not use the old `"src" + base32hex-strip` formula — it is superseded and risks collisions.
 
 ### Loop Protection
 
@@ -82,7 +97,7 @@ This prevents infinite feedback loops if a destination calendar is accidentally 
 ### Recurring Event Handling
 
 - **Master events**: Copy `item.recurrence` array directly to destination payload
-- **Exception events**: Remap `recurringEventId` to destination space using the deterministic ID function, preserve `originalStartTime`
+- **Exception events**: ⚠️ **NOT YET IMPLEMENTED.** Exception instances (events with `recurringEventId`) must remap `recurringEventId` to destination space via `getDestinationEventId(sourceCalendarId, item.recurringEventId)` and preserve `originalStartTime`. Currently `buildDestinationEvent` copies neither — exception instances point at the source master ID, which does not exist in the destination.
 - **NEVER use `singleEvents: true`** - this breaks `syncToken` support
 
 ### Rule Engine Semantics
@@ -108,6 +123,18 @@ rules: [
 - Release lock in `finally` block
 - Track start time and break loops at 5-minute mark: `if (new Date().getTime() - START_TIME > 300000) { break; }`
 - Hard Apps Script limit: 6 minutes per execution
+
+### Outbound Event Field Allowlist
+
+`buildDestinationEvent` copies only the following fields to destination events. Do not add arbitrary source fields — many Calendar API fields are read-only or set by the server:
+
+- `summary` (with rule prefix applied)
+- `description`, `location`
+- `start`, `end` (only `date`, `dateTime`, `timeZone` sub-fields)
+- `transparency`, `visibility`
+- `colorId` (from rule result)
+- `recurrence` (master events only)
+- `extendedProperties.private` (sourceCalendarId, sourceEventId)
 
 ### Error Handling
 

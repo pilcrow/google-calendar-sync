@@ -44,34 +44,10 @@ A clean home for low-level, deterministic logic transformations that don't care 
 
 ---
 
-## 💡 Two Critical Apps Script Architecture Tips
+## 💡 One Critical Apps Script Architecture Tip
 
-Because of the flat namespace, keep these two quirks in mind as you begin implementing your task plan:
-
-### 1. Avoid Top-Level Execution Side Effects
+### Avoid Top-Level Execution Side Effects
 
 Since files execute alphabetically, if you declare a global variable in `Main.gs` that relies on a variable declared in `Utils.gs`, it may evaluate to `undefined` on startup.
 
 * **The Fix:** Keep global variables strictly static (like your configuration object). For anything dynamic (like calculating the current timestamp or execution clock), evaluate it inside a function call at runtime.
-
-### 2. Use a Pseudo-Namespace for Utilities
-
-To ensure functions in `Utils.gs` don't accidentally collide with future global functions or built-in Apps Script keywords, consider grouping them inside a plain JavaScript object to act as a namespace:
-
-```javascript
-// In Utils.gs
-const SyncUtils = {
-  getDeterministicId: function(sourceId) {
-    return "src" + sourceId.toLowerCase().replace(/[^a-v0-9]/g, "");
-  },
-  
-  generateMd5Hash: function(text) {
-    const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, text);
-    return digest.map(chr => (chr < 0 ? chr + 256 : chr).toString(16).padStart(2, '0')).join('');
-  }
-};
-
-// Usage anywhere else in your project:
-const safeId = SyncUtils.getDeterministicId(item.id);
-
-```

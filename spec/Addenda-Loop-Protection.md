@@ -14,6 +14,6 @@ function processSyncItem(item, config, destCalendarId) {
   }
 
   // 2. Proceed with normal execution if it's a native source event...
-  const destId = "src" + item.id.toLowerCase().replace(/[^a-v0-9]/g, "");
+  const destId = getDestinationEventId(sourceCalendarId, item.id);
   // ... rest of your code
 }

@@ -1,3 +1,5 @@
 .clasprc.json
 src/Config.gs
 *.swp
+spec/Review-Plan.md
+spec/Retrospective-*.md
