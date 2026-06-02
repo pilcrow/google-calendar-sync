@@ -33,7 +33,7 @@ function resolveCalendarConfig(calendarConfig) {
         })
       );
     } catch (e) {
-      Logger.log(
+      console.warn(
         'Skipping calendar pair "' +
         config.source +
         '" -> "' +

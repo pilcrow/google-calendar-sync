@@ -13,14 +13,14 @@ function orchestrateCalendarSync() {
   
   try {
     if (!lock.tryLock(LOCK_TIMEOUT_MS)) {
-      Logger.log('Could not acquire lock - another instance is running');
+      console.warn('Could not acquire lock - another instance is running');
       return;
     }
     
-    Logger.log('Starting calendar sync orchestration');
+    console.info('Starting calendar sync orchestration');
 
     if (CALENDAR_CONFIG.length === 0) {
-      Logger.log('No calendar mappings configured');
+      console.warn('No calendar mappings configured');
       return;
     }
 
@@ -28,7 +28,7 @@ function orchestrateCalendarSync() {
     
     for (let i = 0; i < resolvedCalendarConfig.length; i++) {
       if (!hasExecutionTimeRemainingMs()) {
-        Logger.log('Execution timeout reached - stopping');
+        console.warn('Execution timeout reached - stopping');
         break;
       }
       
@@ -37,12 +37,12 @@ function orchestrateCalendarSync() {
       try {
         syncCalendarPair(config);
       } catch (e) {
-        Logger.log('Error syncing calendar pair: ' + e.message);
-        Logger.log(e.stack);
+        console.error('Error syncing calendar pair: ' + e.message);
+        console.error(e.stack);
       }
     }
     
-    Logger.log('Calendar sync orchestration complete');
+    console.info('Calendar sync orchestration complete');
     
   } finally {
     lock.releaseLock();
@@ -59,7 +59,7 @@ function syncCalendarPair(config) {
   const sourceCalendarId = config.sourceCalendarId;
   const destCalendarId = config.destinationCalendarId;
   
-  Logger.log(
+  console.info(
     'Syncing: ' +
     config.source +
     ' (' +
@@ -75,7 +75,7 @@ function syncCalendarPair(config) {
   const syncToken = getSyncToken(sourceCalendarId);
   
   if (configChanged && syncToken) {
-    Logger.log('Config changed - triggering reconciliation sync');
+    console.info('Config changed - triggering reconciliation sync');
     executeReconciliationSync(sourceCalendarId, destCalendarId, config);
     return;
   }
@@ -84,7 +84,7 @@ function syncCalendarPair(config) {
     performIncrementalSync(sourceCalendarId, destCalendarId, config, syncToken);
   } catch (e) {
     if (isHttpError(e, 410, 'Gone')) {
-      Logger.log('Sync token expired (410 Gone) - triggering reconciliation sync');
+      console.warn('Sync token expired (410 Gone) - triggering reconciliation sync');
       executeReconciliationSync(sourceCalendarId, destCalendarId, config);
     } else {
       throw e;
@@ -116,7 +116,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   
   do {
     if (!hasExecutionTimeRemainingMs()) {
-      Logger.log('Execution timeout reached during sync - stopping');
+      console.warn('Execution timeout reached during sync - stopping');
       break;
     }
     
@@ -143,6 +143,6 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   
   if (newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
-    Logger.log('Saved new sync token');
+    console.info('Saved new sync token');
   }
 }

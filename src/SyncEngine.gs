@@ -26,7 +26,7 @@ function paceCalendarWrite() {
  */
 function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
   if (item.extendedProperties?.private?.sourceCalendarId) {
-    Logger.log('Loop Guard: Skipping event "' + item.summary + '" - is a sync replica');
+    console.warn('Loop Guard: Skipping event "' + item.summary + '" - is a sync replica');
     return;
   }
   
@@ -35,7 +35,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
   if (item.status === 'cancelled') {
     try {
       Calendar.Events.remove(destCalendarId, destEventId);
-      Logger.log('Removed cancelled event: ' + destEventId);
+      console.log('Removed cancelled event: ' + destEventId);
     } catch (e) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
@@ -51,7 +51,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
   if (ruleResult.skip) {
     try {
       Calendar.Events.remove(destCalendarId, destEventId);
-      Logger.log('Removed skipped event: ' + item.summary);
+      console.log('Removed skipped event: ' + item.summary);
     } catch (e) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
@@ -67,12 +67,12 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
   try {
     Calendar.Events.get(destCalendarId, destEventId);
     Calendar.Events.update(destEvent, destCalendarId, destEventId);
-    Logger.log('Updated event: ' + destEvent.summary);
+    console.log('Updated event: ' + destEvent.summary);
     paceCalendarWrite();
   } catch (e) {
     if (isHttpError(e, 404, 'Not Found')) {
       Calendar.Events.insert(buildInsertDestinationEvent(destEvent, destEventId), destCalendarId);
-      Logger.log('Inserted event: ' + destEvent.summary);
+      console.log('Inserted event: ' + destEvent.summary);
       paceCalendarWrite();
     } else {
       throw e;
@@ -166,7 +166,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
 
   do {
     if (!hasExecutionTimeRemainingMs()) {
-      Logger.log('Execution timeout reached during sync - stopping');
+      console.warn('Execution timeout reached during sync - stopping');
       return;
     }
 
@@ -195,7 +195,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   if (newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
     setCalendarPairConfigHash(sourceCalendarId, destCalendarId, config.rules);
-    Logger.log('Saved new sync token');
+    console.info('Saved new sync token');
   }
 }
 
@@ -208,7 +208,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
  * @param {Object} config - The configuration object with rules
  */
 function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
-  Logger.log('Starting reconciliation sync for ' + sourceCalendarId);
+  console.info('Starting reconciliation sync for ' + sourceCalendarId);
   
   const allowedSet = new Set();
   const timeMin = getSyncWindowTimeMin();
@@ -216,7 +216,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   let pageToken = null;
   do {
     if (!hasExecutionTimeRemainingMs()) {
-      Logger.log('Execution timeout reached during reconciliation - stopping');
+      console.warn('Execution timeout reached during reconciliation - stopping');
       return;
     }
 
@@ -250,12 +250,12 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     pageToken = response.nextPageToken;
   } while (pageToken);
   
-  Logger.log('AllowedSet size: ' + allowedSet.size);
+  console.info('AllowedSet size: ' + allowedSet.size);
   
   pageToken = null;
   do {
     if (!hasExecutionTimeRemainingMs()) {
-      Logger.log('Execution timeout reached during reconciliation - stopping');
+      console.warn('Execution timeout reached during reconciliation - stopping');
       return;
     }
 
@@ -272,9 +272,9 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
         if (!allowedSet.has(destEvent.id)) {
           try {
             Calendar.Events.remove(destCalendarId, destEvent.id);
-            Logger.log('Removed orphaned event: ' + destEvent.id);
+            console.log('Removed orphaned event: ' + destEvent.id);
           } catch (e) {
-            Logger.log('Failed to remove orphaned event: ' + e.message);
+            console.error('Failed to remove orphaned event: ' + e.message);
           } finally {
             paceCalendarWrite();
           }
@@ -286,5 +286,5 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   } while (pageToken);
   syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin);
   
-  Logger.log('Reconciliation sync complete');
+  console.info('Reconciliation sync complete');
 }
