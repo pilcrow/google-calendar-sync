@@ -120,6 +120,10 @@ rules: [
 - Advanced Calendar Service (`Calendar` API v3) must be enabled in Apps Script project settings
 - Required OAuth scopes are initialized on first manual execution
 
+## Code Review
+
+All code changes must be reviewed before committing or merging to main — by the developer, a collaborator, or a Copilot sub-agent (e.g. the `code-review` agent). Do not commit unreviewed changes.
+
 ## Git Commit Conventions
 
 All commits must include Copilot as co-author. Add this trailer to every commit message:
