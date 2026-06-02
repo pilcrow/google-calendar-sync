@@ -194,7 +194,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
 
   if (newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
-    setConfigHash(generateMd5Hash(JSON.stringify(CALENDAR_CONFIG)));
+    setCalendarPairConfigHash(sourceCalendarId, destCalendarId, config.rules);
     Logger.log('Saved new sync token');
   }
 }

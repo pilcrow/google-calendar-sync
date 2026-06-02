@@ -71,7 +71,7 @@ function syncCalendarPair(config) {
     ')'
   );
   
-  const configChanged = checkConfigChange();
+  const configChanged = checkCalendarPairConfigChange(config);
   const syncToken = getSyncToken(sourceCalendarId);
   
   if (configChanged && syncToken) {

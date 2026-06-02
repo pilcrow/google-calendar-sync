@@ -202,35 +202,66 @@ function setSyncToken(sourceCalendarId, syncToken) {
 }
 
 /**
- * Get the stored configuration hash from user properties.
- * 
- * @return {string|null} The stored config hash, or null if not found
+ * Recursively normalize a config value for stable hashing:
+ * - RegExp objects are converted to their toString() representation
+ * - Object keys are sorted for deterministic order
+ * - Arrays and primitives are passed through
+ *
+ * @param {*} value - Value to normalize
+ * @return {*} Normalized value suitable for JSON.stringify
  */
-function getConfigHash() {
-  const props = PropertiesService.getUserProperties();
-  return props.getProperty('CONFIG_HASH');
+function normalizeConfigForHash(value) {
+  if (value instanceof RegExp) {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(normalizeConfigForHash);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.keys(value).sort().reduce(function(acc, key) {
+      acc[key] = normalizeConfigForHash(value[key]);
+      return acc;
+    }, {});
+  }
+  return value;
 }
 
 /**
- * Store the configuration hash in user properties.
- * 
- * @param {string} hash - The MD5 hash of the current configuration
+ * Get the stored rules hash for a specific calendar pair.
+ *
+ * @param {string} sourceCalendarId - The source calendar identifier
+ * @param {string} destCalendarId - The destination calendar identifier
+ * @return {string|null} The stored hash, or null if not found
  */
-function setConfigHash(hash) {
+function getCalendarPairConfigHash(sourceCalendarId, destCalendarId) {
   const props = PropertiesService.getUserProperties();
-  props.setProperty('CONFIG_HASH', hash);
+  const key = 'CONFIG_HASH_' + encodeURIComponent(sourceCalendarId) + '_' + encodeURIComponent(destCalendarId);
+  return props.getProperty(key);
 }
 
 /**
- * Generate a hash of the current CALENDAR_CONFIG and check if it differs
- * from the stored hash. Returns true if configuration has changed.
- * 
- * @return {boolean} True if config has changed, false otherwise
+ * Store the rules hash for a specific calendar pair.
+ *
+ * @param {string} sourceCalendarId - The source calendar identifier
+ * @param {string} destCalendarId - The destination calendar identifier
+ * @param {Array} rules - The rules array to hash and store
  */
-function checkConfigChange() {
-  const currentConfigJson = JSON.stringify(CALENDAR_CONFIG);
-  const currentHash = generateMd5Hash(currentConfigJson);
-  const storedHash = getConfigHash();
-  
+function setCalendarPairConfigHash(sourceCalendarId, destCalendarId, rules) {
+  const hash = generateMd5Hash(JSON.stringify(normalizeConfigForHash(rules)));
+  const props = PropertiesService.getUserProperties();
+  const key = 'CONFIG_HASH_' + encodeURIComponent(sourceCalendarId) + '_' + encodeURIComponent(destCalendarId);
+  props.setProperty(key, hash);
+}
+
+/**
+ * Check whether the rules for a specific calendar pair have changed since
+ * the last successful sync. Returns true if rules changed or no hash stored yet.
+ *
+ * @param {Object} config - Resolved calendar config with sourceCalendarId, destinationCalendarId, and rules
+ * @return {boolean} True if rules have changed, false otherwise
+ */
+function checkCalendarPairConfigChange(config) {
+  const currentHash = generateMd5Hash(JSON.stringify(normalizeConfigForHash(config.rules)));
+  const storedHash = getCalendarPairConfigHash(config.sourceCalendarId, config.destinationCalendarId);
   return currentHash !== storedHash;
 }
