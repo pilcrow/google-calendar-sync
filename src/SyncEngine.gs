@@ -3,6 +3,17 @@
 
 const LOOKBACK_DAYS = 7;
 const MAX_RESULTS_PER_PAGE = 250;
+const WRITE_PACING_DELAY_MS = 500;
+
+function paceCalendarWrite() {
+  if (WRITE_PACING_DELAY_MS <= 0) {
+    return;
+  }
+  if (!hasExecutionTimeRemainingMs(WRITE_PACING_DELAY_MS)) {
+    return;
+  }
+  Utilities.sleep(WRITE_PACING_DELAY_MS);
+}
 
 /**
  * Process a single event from the source calendar and sync to destination.
@@ -29,6 +40,8 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
       }
+    } finally {
+      paceCalendarWrite();
     }
     return;
   }
@@ -43,6 +56,8 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
       }
+    } finally {
+      paceCalendarWrite();
     }
     return;
   }
@@ -53,10 +68,12 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
     Calendar.Events.get(destCalendarId, destEventId);
     Calendar.Events.update(destEvent, destCalendarId, destEventId);
     Logger.log('Updated event: ' + destEvent.summary);
+    paceCalendarWrite();
   } catch (e) {
     if (isHttpError(e, 404, 'Not Found')) {
       Calendar.Events.insert(buildInsertDestinationEvent(destEvent, destEventId), destCalendarId);
       Logger.log('Inserted event: ' + destEvent.summary);
+      paceCalendarWrite();
     } else {
       throw e;
     }
@@ -258,6 +275,8 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
             Logger.log('Removed orphaned event: ' + destEvent.id);
           } catch (e) {
             Logger.log('Failed to remove orphaned event: ' + e.message);
+          } finally {
+            paceCalendarWrite();
           }
         }
       }

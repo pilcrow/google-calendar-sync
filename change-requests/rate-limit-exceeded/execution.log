@@ -1,0 +1,25 @@
+8:27:46 AM	Notice	Execution started
+8:27:46 AM	Info	Starting calendar sync orchestration
+8:27:46 AM	Info	Skipping calendar pair "T Serving" -> "TEST CALENDAR" because one or both calendars could not be resolved: Calendar "T Serving" was not found in CalendarList
+8:27:46 AM	Info	Syncing: Scouts (p9m2ojhnbup8di4plju394jesfr8mhrp@import.calendar.google.com) -> TEST CALENDAR (ac2ba6e6b43e2bb994543ca9726df9bd5ad2264d272a65da93e277bdb9df23b7@group.calendar.google.com)
+8:27:47 AM	Info	Saved new sync token
+8:27:47 AM	Info	Syncing: K softball EHS (6gbibs9j74077dridv4nn4kg68gmopff@import.calendar.google.com) -> TEST CALENDAR (ac2ba6e6b43e2bb994543ca9726df9bd5ad2264d272a65da93e277bdb9df23b7@group.calendar.google.com)
+8:27:47 AM	Info	Saved new sync token
+8:27:47 AM	Info	Syncing: K Northern Lights (fgtfbga7l6rokqtu9c1g3fl07df2qoth@import.calendar.google.com) -> TEST CALENDAR (ac2ba6e6b43e2bb994543ca9726df9bd5ad2264d272a65da93e277bdb9df23b7@group.calendar.google.com)
+8:27:47 AM	Info	Inserted event: K Northern Lights 18U @ WI Scorpions 18U
+8:27:48 AM	Info	Inserted event: K Northern Lights 18U @ Aftermath Aces 18u
+8:27:48 AM	Info	Inserted event: K Northern Lights 18U @ Wisconsin Heat Fastpitch 18U
+8:27:49 AM	Info	Removed cancelled event: gcs73205964a2ad785d9a9791e33c199809
+8:27:49 AM	Info	Saved new sync token
+8:27:49 AM	Info	Syncing: VARSITY GBB (irg7njc2d1g3frkhqp9i8tadg8@group.calendar.google.com) -> TEST CALENDAR (ac2ba6e6b43e2bb994543ca9726df9bd5ad2264d272a65da93e277bdb9df23b7@group.calendar.google.com)
+8:27:49 AM	Info	Saved new sync token
+8:27:49 AM	Info	Syncing: sportsYou Calendar (jogdvgjpi79kkt353ug0lg2k25s0f8f7@import.calendar.google.com) -> TEST CALENDAR (ac2ba6e6b43e2bb994543ca9726df9bd5ad2264d272a65da93e277bdb9df23b7@group.calendar.google.com)
+8:27:52 AM	Info	Error syncing calendar pair: API call to calendar.events.delete failed with error: Rate Limit Exceeded
+8:27:52 AM	Info	GoogleJsonResponseException: API call to calendar.events.delete failed with error: Rate Limit Exceeded
+    at processSyncItem (SyncEngine:26:23)
+    at performIncrementalSync (Main:132:9)
+    at syncCalendarPair (Main:84:5)
+    at orchestrateCalendarSync (Main:38:9)
+    at __GS_INTERNAL_top_function_call__.gs:1:8
+8:27:52 AM	Info	Calendar sync orchestration complete
+8:27:52 AM	Notice	Execution completed
