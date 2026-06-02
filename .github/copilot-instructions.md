@@ -97,7 +97,8 @@ This prevents infinite feedback loops if a destination calendar is accidentally 
 ### Recurring Event Handling
 
 - **Master events**: Copy `item.recurrence` array directly to destination payload
-- **Exception events**: ⚠️ **NOT YET IMPLEMENTED.** Exception instances (events with `recurringEventId`) must remap `recurringEventId` to destination space via `getDestinationEventId(sourceCalendarId, item.recurringEventId)` and preserve `originalStartTime`. Currently `buildDestinationEvent` copies neither — exception instances point at the source master ID, which does not exist in the destination.
+- **Exception events**: Exception instances (events with `recurringEventId`) are handled by `processExceptionSyncItem`. The destination instance ID is computed as `destMasterId + '_' + suffix` where suffix is extracted from the source exception ID (Google Calendar instance IDs follow the format `<masterId>_<timestamp>`). `Calendar.Events.instances()` is not used. Delta batches are sorted masters-before-exceptions per page in `syncSourceWindow`. If the destination master is absent, the source master is fetched and synced on demand; if the master is rule-filtered, the exception is also skipped.
+- **`recurringEventId` and `originalStartTime`** are read-only API fields and are intentionally excluded from `buildDestinationEvent` and the outbound field allowlist.
 - **NEVER use `singleEvents: true`** - this breaks `syncToken` support
 
 ### Rule Engine Semantics

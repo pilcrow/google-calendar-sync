@@ -29,7 +29,12 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
     console.warn('Loop Guard: Skipping event "' + item.summary + '" - is a sync replica');
     return;
   }
-  
+
+  if (item.recurringEventId) {
+    processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config);
+    return;
+  }
+
   const destEventId = getDestinationEventId(sourceCalendarId, item.id);
   
   if (item.status === 'cancelled') {
@@ -115,6 +120,77 @@ function buildDestinationEvent(sourceEvent, sourceCalendarId, ruleResult) {
   return destEvent;
 }
 
+/**
+ * Process a recurring event exception from the source calendar.
+ * Exception instances have server-assigned IDs (masterId_timestamp) and cannot
+ * be created via insert; instead the corresponding destination instance is updated
+ * in place using an ID derived from the source exception ID.
+ *
+ * @param {Object} item - The source exception event (has recurringEventId set)
+ * @param {string} sourceCalendarId - The source calendar identifier
+ * @param {string} destCalendarId - The destination calendar identifier
+ * @param {Object} config - The configuration object with rules
+ */
+function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config) {
+  const destMasterId = getDestinationEventId(sourceCalendarId, item.recurringEventId);
+  const destInstanceId = destMasterId + '_' + item.id.slice(item.recurringEventId.length + 1);
+
+  if (item.status === 'cancelled') {
+    try {
+      Calendar.Events.remove(destCalendarId, destInstanceId);
+      console.log('Removed cancelled exception instance: ' + destInstanceId);
+    } catch (e) {
+      if (!isHttpError(e, 404, 'Not Found')) {
+        throw e;
+      }
+    } finally {
+      paceCalendarWrite();
+    }
+    return;
+  }
+
+  const ruleResult = evaluateRules(item.summary, config.rules);
+  if (ruleResult.skip) {
+    try {
+      Calendar.Events.remove(destCalendarId, destInstanceId);
+      console.log('Removed skipped exception instance: ' + destInstanceId);
+    } catch (e) {
+      if (!isHttpError(e, 404, 'Not Found')) {
+        throw e;
+      }
+    } finally {
+      paceCalendarWrite();
+    }
+    return;
+  }
+
+  try {
+    Calendar.Events.get(destCalendarId, destMasterId);
+  } catch (e) {
+    if (!isHttpError(e, 404, 'Not Found')) {
+      throw e;
+    }
+    let sourceMaster;
+    try {
+      sourceMaster = Calendar.Events.get(sourceCalendarId, item.recurringEventId);
+    } catch (fetchErr) {
+      console.warn('Exception sync skipped: source master ' + item.recurringEventId + ' not found: ' + fetchErr.message);
+      return;
+    }
+    const masterRuleResult = evaluateRules(sourceMaster.summary, config.rules);
+    if (masterRuleResult.skip) {
+      console.log('Exception sync skipped: master "' + sourceMaster.summary + '" is filtered by rules');
+      return;
+    }
+    processSyncItem(sourceMaster, sourceCalendarId, destCalendarId, config);
+  }
+
+  const destEvent = buildDestinationEvent(item, sourceCalendarId, ruleResult);
+  Calendar.Events.update(destEvent, destCalendarId, destInstanceId);
+  console.log('Updated exception instance: ' + item.summary);
+  paceCalendarWrite();
+}
+
 function addWritableEventField(destEvent, fieldName, value) {
   if (value !== undefined && value !== null) {
     destEvent[fieldName] = value;
@@ -179,9 +255,21 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
     const response = Calendar.Events.list(sourceCalendarId, requestParams);
 
     if (response.items) {
+      const masters = [];
+      const exceptions = [];
       for (let i = 0; i < response.items.length; i++) {
         const item = response.items[i];
-        processSyncItem(item, sourceCalendarId, destCalendarId, config);
+        if (item.recurringEventId) {
+          exceptions.push(item);
+        } else {
+          masters.push(item);
+        }
+      }
+      for (let i = 0; i < masters.length; i++) {
+        processSyncItem(masters[i], sourceCalendarId, destCalendarId, config);
+      }
+      for (let i = 0; i < exceptions.length; i++) {
+        processSyncItem(exceptions[i], sourceCalendarId, destCalendarId, config);
       }
     }
 
@@ -241,8 +329,11 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
         
         const ruleResult = evaluateRules(item.summary, config.rules);
         if (!ruleResult.skip) {
-          const destEventId = getDestinationEventId(sourceCalendarId, item.id);
-          allowedSet.add(destEventId);
+          if (item.recurringEventId) {
+            allowedSet.add(getDestinationInstanceId(sourceCalendarId, item));
+          } else {
+            allowedSet.add(getDestinationEventId(sourceCalendarId, item.id));
+          }
         }
       }
     }

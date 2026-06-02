@@ -10,26 +10,14 @@ If the same source calendar is synced to two different destinations
 reset the token in a way that breaks the other? Needs analysis before
 supporting that configuration.
 
-### Implement recurring exception event handling
+### Handle skip-filtered exception instances previously synced to destination
 
-Exception instances (source events where `item.recurringEventId` is set) are
-currently copied to the destination without remapping their parent pointer.
-This leaves `recurringEventId` pointing at the source master event ID, which
-does not exist in the destination calendar.
-
-Required changes in `buildDestinationEvent` (`SyncEngine.gs`):
-
-```javascript
-if (sourceEvent.recurringEventId) {
-  destEvent.recurringEventId = getDestinationEventId(sourceCalendarId, sourceEvent.recurringEventId);
-}
-if (sourceEvent.originalStartTime) {
-  destEvent.originalStartTime = sourceEvent.originalStartTime;
-}
-```
-
-Also marked in `copilot-instructions.md` (Recurring Event Handling section)
-with a ⚠️ NOT YET IMPLEMENTED warning.
+If an exception instance was previously synced to the destination and a subsequent
+sync determines it should be skipped (by rules), `processExceptionSyncItem` currently
+treats it as a no-op. Correct behavior would restore the occurrence to its unmodified
+state as defined by the master series. Implementing this requires knowing which
+exceptions have been synced and calling `Calendar.Events.update` with the master's
+event data to reset that slot.
 
 ### Consolidate duplicate page-size constants
 

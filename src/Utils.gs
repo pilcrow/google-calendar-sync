@@ -254,6 +254,22 @@ function setCalendarPairConfigHash(sourceCalendarId, destCalendarId, rules) {
 }
 
 /**
+ * Generate a deterministic destination instance ID for a recurring event exception.
+ * Relies on Google Calendar's documented instance ID format: <masterId>_<timestamp>.
+ * The timestamp suffix is extracted from the source exception ID and appended to the
+ * destination master ID.
+ *
+ * @param {string} sourceCalendarId - The source calendar identifier
+ * @param {Object} sourceExceptionItem - The source exception event (must have recurringEventId)
+ * @return {string} The corresponding destination instance ID
+ */
+function getDestinationInstanceId(sourceCalendarId, sourceExceptionItem) {
+  const destMasterId = getDestinationEventId(sourceCalendarId, sourceExceptionItem.recurringEventId);
+  const suffix = sourceExceptionItem.id.slice(sourceExceptionItem.recurringEventId.length + 1);
+  return destMasterId + '_' + suffix;
+}
+
+/**
  * Check whether the rules for a specific calendar pair have changed since
  * the last successful sync. Returns true if rules changed or no hash stored yet.
  *
