@@ -250,7 +250,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     pageToken = response.nextPageToken;
   } while (pageToken);
   
-  console.info('AllowedSet size: ' + allowedSet.size);
+  console.log('AllowedSet size: ' + allowedSet.size);
   
   pageToken = null;
   do {
