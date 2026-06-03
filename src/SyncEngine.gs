@@ -23,14 +23,14 @@ function paceCalendarWrite() {
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
  */
-function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
+function processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics) {
   if (item.extendedProperties?.private?.sourceCalendarId) {
     console.warn('Loop Guard: Skipping event "' + item.summary + '" - is a sync replica');
     return;
   }
 
   if (item.recurringEventId) {
-    processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config);
+    processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
     return;
   }
 
@@ -40,6 +40,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
     try {
       Calendar.Events.remove(destCalendarId, destEventId);
       console.log('Removed cancelled event: ' + destEventId);
+      if (metrics) metrics.deleted++;
     } catch (e) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
@@ -56,6 +57,7 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
     try {
       Calendar.Events.remove(destCalendarId, destEventId);
       console.log('Removed skipped event: ' + item.summary);
+      if (metrics) metrics.deleted++;
     } catch (e) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
@@ -72,11 +74,13 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config) {
     Calendar.Events.get(destCalendarId, destEventId);
     Calendar.Events.update(destEvent, destCalendarId, destEventId);
     console.log('Updated event: ' + destEvent.summary);
+    if (metrics) metrics.updated++;
     paceCalendarWrite();
   } catch (e) {
     if (isHttpError(e, 404, 'Not Found')) {
       Calendar.Events.insert(buildInsertDestinationEvent(destEvent, destEventId), destCalendarId);
       console.log('Inserted event: ' + destEvent.summary);
+      if (metrics) metrics.added++;
       paceCalendarWrite();
     } else {
       throw e;
@@ -130,7 +134,7 @@ function buildDestinationEvent(sourceEvent, sourceCalendarId, ruleResult) {
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
  */
-function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config) {
+function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config, metrics) {
   const destMasterId = getDestinationEventId(sourceCalendarId, item.recurringEventId);
   const destInstanceId = destMasterId + '_' + item.id.slice(item.recurringEventId.length + 1);
 
@@ -138,6 +142,7 @@ function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config
     try {
       Calendar.Events.remove(destCalendarId, destInstanceId);
       console.log('Removed cancelled exception instance: ' + destInstanceId);
+      if (metrics) metrics.deleted++;
     } catch (e) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
@@ -153,6 +158,7 @@ function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config
     try {
       Calendar.Events.remove(destCalendarId, destInstanceId);
       console.log('Removed skipped exception instance: ' + destInstanceId);
+      if (metrics) metrics.deleted++;
     } catch (e) {
       if (!isHttpError(e, 404, 'Not Found')) {
         throw e;
@@ -181,12 +187,13 @@ function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config
       console.log('Exception sync skipped: master "' + sourceMaster.summary + '" is filtered by rules');
       return;
     }
-    processSyncItem(sourceMaster, sourceCalendarId, destCalendarId, config);
+    processSyncItem(sourceMaster, sourceCalendarId, destCalendarId, config, metrics);
   }
 
   const destEvent = buildDestinationEvent(item, sourceCalendarId, ruleResult);
   Calendar.Events.update(destEvent, destCalendarId, destInstanceId);
   console.log('Updated exception instance: ' + item.summary);
+  if (metrics) metrics.updated++;
   paceCalendarWrite();
 }
 
@@ -231,6 +238,8 @@ function getSyncWindowTimeMin() {
  * @param {string=} timeMin - Optional ISO timestamp overriding the default sync window start
  */
 function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
+  const startMs = Date.now();
+  const metrics = { added: 0, updated: 0, deleted: 0 };
   const requestParams = {
     timeMin: timeMin || getSyncWindowTimeMin(),
     singleEvents: false,
@@ -265,10 +274,10 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
         }
       }
       for (let i = 0; i < masters.length; i++) {
-        processSyncItem(masters[i], sourceCalendarId, destCalendarId, config);
+        processSyncItem(masters[i], sourceCalendarId, destCalendarId, config, metrics);
       }
       for (let i = 0; i < exceptions.length; i++) {
-        processSyncItem(exceptions[i], sourceCalendarId, destCalendarId, config);
+        processSyncItem(exceptions[i], sourceCalendarId, destCalendarId, config, metrics);
       }
     }
 
@@ -282,7 +291,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   if (newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
     setCalendarPairConfigHash(sourceCalendarId, destCalendarId, config.rules);
-    console.info('Saved new sync token');
+    console.info('Sync complete ' + ((Date.now() - startMs) / 1000).toFixed(1) + 's; ' + metrics.added + ' added, ' + metrics.updated + ' updated, ' + metrics.deleted + ' deleted');
   }
 }
 

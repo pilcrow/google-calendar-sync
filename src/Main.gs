@@ -106,6 +106,8 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
     return;
   }
 
+  const startMs = Date.now();
+  const metrics = { added: 0, updated: 0, deleted: 0 };
   const requestParams = {
     syncToken: syncToken,
     singleEvents: false,
@@ -129,7 +131,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
     if (response.items) {
       for (let i = 0; i < response.items.length; i++) {
         const item = response.items[i];
-        processSyncItem(item, sourceCalendarId, destCalendarId, config);
+        processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
       }
     }
     
@@ -143,6 +145,6 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   
   if (newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
-    console.info('Saved new sync token');
+    console.info('Sync complete ' + ((Date.now() - startMs) / 1000).toFixed(1) + 's; ' + metrics.added + ' added, ' + metrics.updated + ' updated, ' + metrics.deleted + ' deleted');
   }
 }
