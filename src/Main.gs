@@ -42,7 +42,7 @@ function orchestrateCalendarSync() {
       }
     }
     
-    console.info('Calendar sync orchestration complete');
+    console.info('Calendar sync orchestration complete ' + ((Date.now() - EXECUTION_START_MS) / 1000).toFixed(1) + 's');
     
   } finally {
     lock.releaseLock();
