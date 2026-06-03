@@ -17,7 +17,9 @@
 // 10 (#51b749) Basil / Green
 // 11 (#dc2127) Tomato / Bold Red
 
-const API_PAGE_SIZE = 250;
+// Uncomment and modify to override the default API page size (250).
+// This controls how many events are fetched per API request.
+// const API_PAGE_SIZE = 250;
 
 const CALENDAR_CONFIG = [
   {

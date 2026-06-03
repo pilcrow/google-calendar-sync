@@ -59,7 +59,7 @@ function buildCalendarLookup() {
   do {
     const response = Calendar.CalendarList.list({
       showHidden: true,
-      maxResults: API_PAGE_SIZE,
+      maxResults: (typeof API_PAGE_SIZE !== 'undefined') ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE,
       pageToken: pageToken
     });
     const items = response.items || [];

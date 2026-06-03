@@ -2,6 +2,7 @@
 // Main orchestration entry point for calendar synchronization
 
 const LOCK_TIMEOUT_MS = 30000;
+const DEFAULT_API_PAGE_SIZE = 250;
 
 /**
  * Main entry point for calendar synchronization.
@@ -112,7 +113,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   const requestParams = {
     syncToken: syncToken,
     singleEvents: false,
-    maxResults: API_PAGE_SIZE
+    maxResults: (typeof API_PAGE_SIZE !== 'undefined') ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE
   };
   let pageToken = null;
   let newSyncToken = null;

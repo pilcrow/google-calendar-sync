@@ -243,7 +243,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   const requestParams = {
     timeMin: timeMin || getSyncWindowTimeMin(),
     singleEvents: false,
-    maxResults: API_PAGE_SIZE
+    maxResults: (typeof API_PAGE_SIZE !== 'undefined') ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE
   };
   let pageToken = null;
   let newSyncToken = null;
@@ -319,7 +319,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     const response = Calendar.Events.list(sourceCalendarId, {
       timeMin: timeMin,
       singleEvents: false,
-      maxResults: API_PAGE_SIZE,
+      maxResults: (typeof API_PAGE_SIZE !== 'undefined') ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE,
       pageToken: pageToken
     });
     
@@ -361,7 +361,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
 
     const response = Calendar.Events.list(destCalendarId, {
       privateExtendedProperty: 'sourceCalendarId=' + sourceCalendarId,
-      maxResults: API_PAGE_SIZE,
+      maxResults: (typeof API_PAGE_SIZE !== 'undefined') ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE,
       pageToken: pageToken
     });
     
