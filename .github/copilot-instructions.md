@@ -98,6 +98,7 @@ This prevents infinite feedback loops if a destination calendar is accidentally 
 
 - **Master events**: Copy `item.recurrence` array directly to destination payload
 - **Exception events**: Exception instances (events with `recurringEventId`) are handled by `processExceptionSyncItem`. The destination instance ID is computed as `destMasterId + '_' + suffix` where suffix is extracted from the source exception ID (Google Calendar instance IDs follow the format `<masterId>_<timestamp>`). `Calendar.Events.instances()` is not used. Delta batches are sorted masters-before-exceptions per page in `syncSourceWindow`. If the destination master is absent, the source master is fetched and synced on demand; if the master is rule-filtered, the exception is also skipped.
+- **Exception rule evaluation**: Each exception's summary is evaluated independently against rules — the master's rule result is not inherited. Skip, prefix, and colorId all come from the exception's own summary match. In the common case where a reschedule doesn't change the summary, the same rule fires and the same color/prefix apply. If no rule matches the exception summary, `colorId` is omitted from the update payload and the destination instance inherits the series color from the destination master.
 - **`recurringEventId` and `originalStartTime`** are read-only API fields and are intentionally excluded from `buildDestinationEvent` and the outbound field allowlist.
 - **NEVER use `singleEvents: true`** - this breaks `syncToken` support
 
