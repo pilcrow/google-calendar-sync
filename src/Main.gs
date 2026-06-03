@@ -18,6 +18,7 @@ function orchestrateCalendarSync() {
     }
     
     console.info('Starting calendar sync orchestration');
+    const orchestrationStartMs = Date.now();
 
     if (CALENDAR_CONFIG.length === 0) {
       console.warn('No calendar mappings configured');
@@ -42,7 +43,7 @@ function orchestrateCalendarSync() {
       }
     }
     
-    console.info('Calendar sync orchestration complete ' + ((Date.now() - EXECUTION_START_MS) / 1000).toFixed(1) + 's');
+    console.info('Calendar sync orchestration complete ' + ((Date.now() - orchestrationStartMs) / 1000).toFixed(1) + 's');
     
   } finally {
     lock.releaseLock();
