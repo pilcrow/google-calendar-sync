@@ -319,6 +319,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
         const item = response.items[i];
         
         if (item.extendedProperties?.private?.sourceCalendarId) {
+          console.warn('Loop Guard: Skipping event "' + item.summary + '" in reconciliation - is a sync replica');
           continue;
         }
         

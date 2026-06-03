@@ -18,15 +18,3 @@ treats it as a no-op. Correct behavior would restore the occurrence to its unmod
 state as defined by the master series. Implementing this requires knowing which
 exceptions have been synced and calling `Calendar.Events.update` with the master's
 event data to reset that slot.
-
-### Consolidate duplicate page-size constants
-
-`MAX_RESULTS_PER_PAGE = 250` (`SyncEngine.gs`) and `CALENDAR_LIST_MAX_RESULTS = 250`
-(`Utils.gs`) are identical. Consolidate into a single constant in `Config.gs`
-(or `Utils.gs`) and update both references.
-
-### Loop guard in reconciliation should warn
-
-`executeReconciliationSync` silently `continue`s when it encounters a sync
-replica (loop guard). `processSyncItem` fires a `console.warn` in the same
-case. Reconciliation should also warn for consistency and visibility.
