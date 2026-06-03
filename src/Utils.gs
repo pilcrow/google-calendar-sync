@@ -4,7 +4,6 @@
 // Use 5 minutes of Apps Script's default 6-minute execution limit.
 const EXECUTION_TIMEOUT_MS = 300000;
 const EXECUTION_START_MS = Date.now();
-const CALENDAR_LIST_MAX_RESULTS = 250;
 
 function hasExecutionTimeRemainingMs(minimumRemainingMs) {
   return Date.now() - EXECUTION_START_MS < EXECUTION_TIMEOUT_MS - (minimumRemainingMs || 0);
@@ -60,7 +59,7 @@ function buildCalendarLookup() {
   do {
     const response = Calendar.CalendarList.list({
       showHidden: true,
-      maxResults: CALENDAR_LIST_MAX_RESULTS,
+      maxResults: API_PAGE_SIZE,
       pageToken: pageToken
     });
     const items = response.items || [];

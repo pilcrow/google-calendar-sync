@@ -109,7 +109,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   const requestParams = {
     syncToken: syncToken,
     singleEvents: false,
-    maxResults: MAX_RESULTS_PER_PAGE
+    maxResults: API_PAGE_SIZE
   };
   let pageToken = null;
   let newSyncToken = null;

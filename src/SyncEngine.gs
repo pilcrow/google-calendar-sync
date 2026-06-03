@@ -2,7 +2,6 @@
 // Core synchronization engine for processing events and reconciliation
 
 const LOOKBACK_DAYS = 7;
-const MAX_RESULTS_PER_PAGE = 250;
 const WRITE_PACING_DELAY_MS = 500;
 
 function paceCalendarWrite() {
@@ -235,7 +234,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   const requestParams = {
     timeMin: timeMin || getSyncWindowTimeMin(),
     singleEvents: false,
-    maxResults: MAX_RESULTS_PER_PAGE
+    maxResults: API_PAGE_SIZE
   };
   let pageToken = null;
   let newSyncToken = null;
@@ -311,7 +310,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     const response = Calendar.Events.list(sourceCalendarId, {
       timeMin: timeMin,
       singleEvents: false,
-      maxResults: MAX_RESULTS_PER_PAGE,
+      maxResults: API_PAGE_SIZE,
       pageToken: pageToken
     });
     
@@ -352,7 +351,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
 
     const response = Calendar.Events.list(destCalendarId, {
       privateExtendedProperty: 'sourceCalendarId=' + sourceCalendarId,
-      maxResults: MAX_RESULTS_PER_PAGE,
+      maxResults: API_PAGE_SIZE,
       pageToken: pageToken
     });
     
