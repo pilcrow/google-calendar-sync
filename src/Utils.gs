@@ -21,8 +21,7 @@ function resolveCalendarConfig(calendarConfig) {
   const calendarLookup = buildCalendarLookup();
   const resolvedCalendarConfig = [];
 
-  for (let i = 0; i < calendarConfig.length; i++) {
-    const config = calendarConfig[i];
+  for (const config of calendarConfig) {
 
     try {
       resolvedCalendarConfig.push(
@@ -64,8 +63,7 @@ function buildCalendarLookup() {
     });
     const items = response.items || [];
 
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
+    for (const item of items) {
       byId[item.id] = item.id;
 
       const displayName = getCalendarDisplayName(item);

@@ -28,14 +28,12 @@ function orchestrateCalendarSync() {
 
     const resolvedCalendarConfig = resolveCalendarConfig(CALENDAR_CONFIG);
     
-    for (let i = 0; i < resolvedCalendarConfig.length; i++) {
+    for (const config of resolvedCalendarConfig) {
       if (!hasExecutionTimeRemainingMs()) {
         console.warn('Execution timeout reached - stopping');
         break;
       }
-      
-      const config = resolvedCalendarConfig[i];
-      
+
       try {
         syncCalendarPair(config);
       } catch (e) {
@@ -131,8 +129,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
     const response = Calendar.Events.list(sourceCalendarId, requestParams);
     
     if (response.items) {
-      for (let i = 0; i < response.items.length; i++) {
-        const item = response.items[i];
+      for (const item of response.items) {
         processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
       }
     }

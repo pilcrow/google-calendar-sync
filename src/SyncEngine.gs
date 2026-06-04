@@ -265,19 +265,18 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
     if (response.items) {
       const masters = [];
       const exceptions = [];
-      for (let i = 0; i < response.items.length; i++) {
-        const item = response.items[i];
+      for (const item of response.items) {
         if (item.recurringEventId) {
           exceptions.push(item);
         } else {
           masters.push(item);
         }
       }
-      for (let i = 0; i < masters.length; i++) {
-        processSyncItem(masters[i], sourceCalendarId, destCalendarId, config, metrics);
+      for (const item of masters) {
+        processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
       }
-      for (let i = 0; i < exceptions.length; i++) {
-        processSyncItem(exceptions[i], sourceCalendarId, destCalendarId, config, metrics);
+      for (const item of exceptions) {
+        processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
       }
     }
 
@@ -324,8 +323,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     });
     
     if (response.items) {
-      for (let i = 0; i < response.items.length; i++) {
-        const item = response.items[i];
+      for (const item of response.items) {
         
         if (item.extendedProperties?.private?.sourceCalendarId) {
           console.warn('Loop Guard: Skipping event "' + item.summary + '" in reconciliation - is a sync replica');
@@ -366,8 +364,7 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     });
     
     if (response.items) {
-      for (let i = 0; i < response.items.length; i++) {
-        const destEvent = response.items[i];
+      for (const destEvent of response.items) {
         
         if (!allowedSet.has(destEvent.id)) {
           try {

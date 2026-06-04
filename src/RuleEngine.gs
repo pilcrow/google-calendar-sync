@@ -24,8 +24,7 @@ function evaluateRules(summary, rules) {
     return result;
   }
   
-  for (let i = 0; i < rules.length; i++) {
-    const rule = rules[i];
+  for (const rule of rules) {
     
     let matches = false;
     if (rule.match) {
