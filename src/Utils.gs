@@ -132,6 +132,26 @@ function isHttpError(error, statusCode, fallbackText) {
 }
 
 /**
+ * Remove a calendar event, silently ignoring 404 (not found) and 410 (already
+ * deleted) responses so callers are idempotent.
+ *
+ * @param {string} calendarId - The calendar containing the event
+ * @param {string} eventId - The event to remove
+ * @return {boolean} true if the event was removed, false if it was already absent
+ */
+function removeEventIfExists(calendarId, eventId) {
+  try {
+    Calendar.Events.remove(calendarId, eventId);
+    return true;
+  } catch (e) {
+    if (isHttpError(e, 404, 'Not Found') || isHttpError(e, 410, 'Resource has been deleted')) {
+      return false;
+    }
+    throw e;
+  }
+}
+
+/**
  * Generate a deterministic destination event ID from source calendar and event IDs.
  * Uses MD5 hash of the concatenation to ensure global uniqueness across all source calendars.
  * 

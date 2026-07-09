@@ -38,12 +38,9 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics
   
   if (item.status === 'cancelled') {
     try {
-      Calendar.Events.remove(destCalendarId, destEventId);
-      console.log('Removed cancelled event: ' + destEventId);
-      if (metrics) metrics.deleted++;
-    } catch (e) {
-      if (!isHttpError(e, 404, 'Not Found')) {
-        throw e;
+      if (removeEventIfExists(destCalendarId, destEventId)) {
+        console.log('Removed cancelled event: ' + destEventId);
+        if (metrics) metrics.deleted++;
       }
     } finally {
       paceCalendarWrite();
@@ -55,12 +52,9 @@ function processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics
   
   if (ruleResult.skip) {
     try {
-      Calendar.Events.remove(destCalendarId, destEventId);
-      console.log('Removed skipped event: ' + item.summary);
-      if (metrics) metrics.deleted++;
-    } catch (e) {
-      if (!isHttpError(e, 404, 'Not Found')) {
-        throw e;
+      if (removeEventIfExists(destCalendarId, destEventId)) {
+        console.log('Removed skipped event: ' + item.summary);
+        if (metrics) metrics.deleted++;
       }
     } finally {
       paceCalendarWrite();
@@ -140,12 +134,9 @@ function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config
 
   if (item.status === 'cancelled') {
     try {
-      Calendar.Events.remove(destCalendarId, destInstanceId);
-      console.log('Removed cancelled exception instance: ' + destInstanceId);
-      if (metrics) metrics.deleted++;
-    } catch (e) {
-      if (!isHttpError(e, 404, 'Not Found')) {
-        throw e;
+      if (removeEventIfExists(destCalendarId, destInstanceId)) {
+        console.log('Removed cancelled exception instance: ' + destInstanceId);
+        if (metrics) metrics.deleted++;
       }
     } finally {
       paceCalendarWrite();
@@ -156,12 +147,9 @@ function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config
   const ruleResult = evaluateRules(item.summary, config.rules);
   if (ruleResult.skip) {
     try {
-      Calendar.Events.remove(destCalendarId, destInstanceId);
-      console.log('Removed skipped exception instance: ' + destInstanceId);
-      if (metrics) metrics.deleted++;
-    } catch (e) {
-      if (!isHttpError(e, 404, 'Not Found')) {
-        throw e;
+      if (removeEventIfExists(destCalendarId, destInstanceId)) {
+        console.log('Removed skipped exception instance: ' + destInstanceId);
+        if (metrics) metrics.deleted++;
       }
     } finally {
       paceCalendarWrite();
@@ -368,8 +356,9 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
         
         if (!allowedSet.has(destEvent.id)) {
           try {
-            Calendar.Events.remove(destCalendarId, destEvent.id);
-            console.log('Removed orphaned event: ' + destEvent.id);
+            if (removeEventIfExists(destCalendarId, destEvent.id)) {
+              console.log('Removed orphaned event: ' + destEvent.id);
+            }
           } catch (e) {
             console.error('Failed to remove orphaned event: ' + e.message);
           } finally {
