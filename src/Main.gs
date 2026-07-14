@@ -10,17 +10,16 @@ const DEFAULT_API_PAGE_SIZE = 250;
  * and timeout management. Designed to be run on a time-driven trigger (every 15 minutes).
  */
 function orchestrateCalendarSync() {
-  const lock = LockService.getScriptLock();
-  
-  try {
-    if (!lock.tryLock(LOCK_TIMEOUT_MS)) {
-      console.warn('Could not acquire lock - another instance is running');
-      return;
-    }
-    
-    console.info('Starting calendar sync orchestration');
-    const orchestrationStartMs = Date.now();
+  console.info('Starting calendar sync orchestration');
+  const orchestrationStartMs = Date.now();
 
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(LOCK_TIMEOUT_MS)) {
+    console.warn('Could not acquire lock - another instance is running');
+    return;
+  }
+
+  try {
     if (CALENDAR_CONFIG.length === 0) {
       console.warn('No calendar mappings configured');
       return;
