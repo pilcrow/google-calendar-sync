@@ -130,7 +130,7 @@ function buildDestinationEvent(sourceEvent, sourceCalendarId, ruleResult) {
  */
 function processExceptionSyncItem(item, sourceCalendarId, destCalendarId, config, metrics) {
   const destMasterId = getDestinationEventId(sourceCalendarId, item.recurringEventId);
-  const destInstanceId = destMasterId + '_' + item.id.slice(item.recurringEventId.length + 1);
+  const destInstanceId = getDestinationInstanceId(sourceCalendarId, item);
 
   if (item.status === 'cancelled') {
     try {
@@ -235,6 +235,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   };
   let pageToken = null;
   let newSyncToken = null;
+  let timedOutMidPage = false;
 
   do {
     if (!hasExecutionTimeRemainingMs()) {
@@ -261,11 +262,30 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
         }
       }
       for (const item of masters) {
+        if (!hasExecutionTimeRemainingMs(1000)) {
+          console.warn('Execution timeout reached during item processing - stopping');
+          timedOutMidPage = true;
+          break;
+        }
         processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
       }
+
+      if (timedOutMidPage) {
+        break;
+      }
+
       for (const item of exceptions) {
+        if (!hasExecutionTimeRemainingMs(1000)) {
+          console.warn('Execution timeout reached during item processing - stopping');
+          timedOutMidPage = true;
+          break;
+        }
         processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
       }
+    }
+
+    if (timedOutMidPage) {
+      break;
     }
 
     pageToken = response.nextPageToken;
@@ -275,7 +295,7 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
     }
   } while (pageToken);
 
-  if (newSyncToken) {
+  if (!timedOutMidPage && newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
     setCalendarPairConfigHash(sourceCalendarId, destCalendarId, config.rules);
     console.info('Sync complete ' + ((Date.now() - startMs) / 1000).toFixed(1) + 's; ' + metrics.added + ' added, ' + metrics.updated + ' updated, ' + metrics.deleted + ' deleted');
@@ -312,6 +332,10 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     
     if (response.items) {
       for (const item of response.items) {
+        if (!hasExecutionTimeRemainingMs(1000)) {
+          console.warn('Execution timeout reached during reconciliation source processing - stopping');
+          return;
+        }
         
         if (item.extendedProperties?.private?.sourceCalendarId) {
           console.warn('Loop Guard: Skipping event "' + item.summary + '" in reconciliation - is a sync replica');
@@ -353,6 +377,10 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     
     if (response.items) {
       for (const destEvent of response.items) {
+        if (!hasExecutionTimeRemainingMs(1000)) {
+          console.warn('Execution timeout reached during reconciliation destination processing - stopping');
+          return;
+        }
         
         if (!allowedSet.has(destEvent.id)) {
           try {

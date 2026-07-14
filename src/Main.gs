@@ -26,6 +26,7 @@ function orchestrateCalendarSync() {
     }
 
     const resolvedCalendarConfig = resolveCalendarConfig(CALENDAR_CONFIG);
+    validateUniqueSourceCalendarMappings(resolvedCalendarConfig);
     
     for (const config of resolvedCalendarConfig) {
       if (!hasExecutionTimeRemainingMs()) {
@@ -114,6 +115,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
   };
   let pageToken = null;
   let newSyncToken = null;
+  let timedOutMidPage = false;
   
   do {
     if (!hasExecutionTimeRemainingMs()) {
@@ -129,8 +131,17 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
     
     if (response.items) {
       for (const item of response.items) {
+        if (!hasExecutionTimeRemainingMs(1000)) {
+          console.warn('Execution timeout reached during item processing - stopping');
+          timedOutMidPage = true;
+          break;
+        }
         processSyncItem(item, sourceCalendarId, destCalendarId, config, metrics);
       }
+    }
+
+    if (timedOutMidPage) {
+      break;
     }
     
     pageToken = response.nextPageToken;
@@ -141,7 +152,7 @@ function performIncrementalSync(sourceCalendarId, destCalendarId, config, syncTo
     
   } while (pageToken);
   
-  if (newSyncToken) {
+  if (!timedOutMidPage && newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
     console.info('Sync complete ' + ((Date.now() - startMs) / 1000).toFixed(1) + 's; ' + metrics.added + ' added, ' + metrics.updated + ' updated, ' + metrics.deleted + ' deleted');
   }

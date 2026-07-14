@@ -46,6 +46,48 @@ function resolveCalendarConfig(calendarConfig) {
 }
 
 /**
+ * Validate that each source calendar is configured at most once.
+ * Sync tokens are keyed only by source calendar ID, so fan-out mappings are
+ * unsupported and can lead to incorrect sync state.
+ *
+ * @param {Object[]} resolvedCalendarConfig - Resolved mappings with sourceCalendarId
+ */
+function validateUniqueSourceCalendarMappings(resolvedCalendarConfig) {
+  const sourceToMappings = {};
+
+  for (const config of resolvedCalendarConfig) {
+    if (!sourceToMappings[config.sourceCalendarId]) {
+      sourceToMappings[config.sourceCalendarId] = [];
+    }
+    sourceToMappings[config.sourceCalendarId].push(config);
+  }
+
+  const duplicateMessages = [];
+  for (const sourceCalendarId in sourceToMappings) {
+    const mappings = sourceToMappings[sourceCalendarId];
+    if (mappings.length > 1) {
+      duplicateMessages.push(
+        '"' +
+        mappings[0].source +
+        '" (' +
+        sourceCalendarId +
+        ') maps to multiple destinations: ' +
+        mappings.map(function(mapping) {
+          return '"' + mapping.destination + '" (' + mapping.destinationCalendarId + ')';
+        }).join(', ')
+      );
+    }
+  }
+
+  if (duplicateMessages.length > 0) {
+    throw new Error(
+      'Each source calendar can appear in only one CALENDAR_CONFIG entry. ' +
+      duplicateMessages.join('; ')
+    );
+  }
+}
+
+/**
  * Build lookup tables from the user's calendar list.
  *
  * @return {Object} Lookup tables keyed by ID and effective display name

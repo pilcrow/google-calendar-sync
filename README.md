@@ -90,5 +90,5 @@ In the Apps Script IDE: **Triggers → Add Trigger**:
 
 ## Limitations
 
-- **One-to-one source mapping only:** The same source calendar should not appear in more than one `CALENDAR_CONFIG` entry. Sync tokens are keyed by source only; multi-destination fan-out behavior is untested and unsupported.
+- **One-to-one source mapping only:** The same source calendar must not appear in more than one `CALENDAR_CONFIG` entry. Sync tokens are keyed by source only, so fan-out is unsupported. The script validates this at startup and aborts if duplicates are configured.
 - **Skip-filtered exception cleanup:** If a recurring event exception is later excluded by a rule change, it is removed during the next reconciliation sync (which the rule change triggers automatically), not immediately during incremental sync.
