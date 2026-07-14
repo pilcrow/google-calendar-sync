@@ -224,6 +224,7 @@ function getSyncWindowTimeMin() {
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
  * @param {string=} timeMin - Optional ISO timestamp overriding the default sync window start
+ * @return {Object} Metrics object with added, updated, deleted, and timedOut fields
  */
 function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   const startMs = Date.now();
@@ -236,11 +237,13 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
   let pageToken = null;
   let newSyncToken = null;
   let timedOutMidPage = false;
+  let timedOut = false;
 
   do {
     if (!hasExecutionTimeRemainingMs()) {
       console.warn('Execution timeout reached during sync - stopping');
-      return;
+      timedOut = true;
+      break;
     }
 
     if (pageToken) {
@@ -295,11 +298,18 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
     }
   } while (pageToken);
 
-  if (!timedOutMidPage && newSyncToken) {
+  if (!timedOut && !timedOutMidPage && newSyncToken) {
     setSyncToken(sourceCalendarId, newSyncToken);
     setCalendarPairConfigHash(sourceCalendarId, destCalendarId, config.rules);
     console.info('Sync complete ' + ((Date.now() - startMs) / 1000).toFixed(1) + 's; ' + metrics.added + ' added, ' + metrics.updated + ' updated, ' + metrics.deleted + ' deleted');
   }
+
+  return {
+    added: metrics.added,
+    updated: metrics.updated,
+    deleted: metrics.deleted,
+    timedOut: timedOut || timedOutMidPage
+  };
 }
 
 /**
@@ -309,10 +319,12 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
  * @param {string} sourceCalendarId - The source calendar identifier
  * @param {string} destCalendarId - The destination calendar identifier
  * @param {Object} config - The configuration object with rules
+ * @return {Object} Metrics object with added, updated, deleted, and timedOut fields
  */
 function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   console.info('Starting reconciliation sync for ' + sourceCalendarId);
   
+  const metrics = { added: 0, updated: 0, deleted: 0 };
   const allowedSet = new Set();
   const timeMin = getSyncWindowTimeMin();
   
@@ -320,7 +332,12 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   do {
     if (!hasExecutionTimeRemainingMs()) {
       console.warn('Execution timeout reached during reconciliation - stopping');
-      return;
+      return {
+        added: metrics.added,
+        updated: metrics.updated,
+        deleted: metrics.deleted,
+        timedOut: true
+      };
     }
 
     const response = Calendar.Events.list(sourceCalendarId, {
@@ -334,7 +351,12 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
       for (const item of response.items) {
         if (!hasExecutionTimeRemainingMs(1000)) {
           console.warn('Execution timeout reached during reconciliation source processing - stopping');
-          return;
+          return {
+            added: metrics.added,
+            updated: metrics.updated,
+            deleted: metrics.deleted,
+            timedOut: true
+          };
         }
         
         if (item.extendedProperties?.private?.sourceCalendarId) {
@@ -366,7 +388,12 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
   do {
     if (!hasExecutionTimeRemainingMs()) {
       console.warn('Execution timeout reached during reconciliation - stopping');
-      return;
+      return {
+        added: metrics.added,
+        updated: metrics.updated,
+        deleted: metrics.deleted,
+        timedOut: true
+      };
     }
 
     const response = Calendar.Events.list(destCalendarId, {
@@ -379,13 +406,19 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
       for (const destEvent of response.items) {
         if (!hasExecutionTimeRemainingMs(1000)) {
           console.warn('Execution timeout reached during reconciliation destination processing - stopping');
-          return;
+          return {
+            added: metrics.added,
+            updated: metrics.updated,
+            deleted: metrics.deleted,
+            timedOut: true
+          };
         }
         
         if (!allowedSet.has(destEvent.id)) {
           try {
             if (removeEventIfExists(destCalendarId, destEvent.id)) {
               console.log('Removed orphaned event: ' + destEvent.id);
+              metrics.deleted++;
             }
           } catch (e) {
             console.error('Failed to remove orphaned event: ' + e.message);
@@ -398,7 +431,18 @@ function executeReconciliationSync(sourceCalendarId, destCalendarId, config) {
     
     pageToken = response.nextPageToken;
   } while (pageToken);
-  syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin);
+  const syncWindowMetrics = syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin);
+  if (syncWindowMetrics) {
+    metrics.added += syncWindowMetrics.added || 0;
+    metrics.updated += syncWindowMetrics.updated || 0;
+    metrics.deleted += syncWindowMetrics.deleted || 0;
+  }
   
   console.info('Reconciliation sync complete');
+  return {
+    added: metrics.added,
+    updated: metrics.updated,
+    deleted: metrics.deleted,
+    timedOut: !!(syncWindowMetrics && syncWindowMetrics.timedOut)
+  };
 }
