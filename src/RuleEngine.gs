@@ -28,6 +28,10 @@ function evaluateRules(summary, rules) {
     
     let matches = false;
     if (rule.match) {
+      // RegExp#test is stateful for /g and /y, so normalize each evaluation.
+      if (rule.match.global || rule.match.sticky) {
+        rule.match.lastIndex = 0;
+      }
       matches = rule.match.test(summary);
     } else {
       matches = true;
