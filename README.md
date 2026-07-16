@@ -7,6 +7,7 @@ For architecture and implementation details, see [spec/Design.md](spec/Design.md
 ## How It Works
 
 The script runs on a 15-minute time-driven trigger. It uses Google Calendar's incremental sync (`syncToken`) to process only changed events, preserving recurring event structure. Each source→destination mapping is independent and rule-driven.
+After the managed mapping registry is initialized, removing a mapping from `CALENDAR_CONFIG` cleans previously synced events for that mapping from the destination calendar and clears related sync state.
 
 ## Prerequisites
 

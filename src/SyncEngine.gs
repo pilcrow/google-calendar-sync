@@ -313,6 +313,76 @@ function syncSourceWindow(sourceCalendarId, destCalendarId, config, timeMin) {
 }
 
 /**
+ * Remove destination events that belong to a source/destination mapping that
+ * no longer exists in CALENDAR_CONFIG.
+ *
+ * @param {string} sourceCalendarId - The removed source calendar identifier
+ * @param {string} destCalendarId - The removed destination calendar identifier
+ * @return {Object} Metrics object with deleted and timedOut fields
+ */
+function cleanupRemovedCalendarPair(sourceCalendarId, destCalendarId) {
+  console.info('Cleaning removed calendar mapping: ' + sourceCalendarId + ' -> ' + destCalendarId);
+
+  const metrics = { deleted: 0, timedOut: false };
+  let pageToken = null;
+
+  do {
+    if (!hasExecutionTimeRemainingMs()) {
+      console.warn('Execution timeout reached during removed mapping cleanup - stopping');
+      metrics.timedOut = true;
+      break;
+    }
+
+    let response;
+    try {
+      response = Calendar.Events.list(destCalendarId, {
+        privateExtendedProperty: 'sourceCalendarId=' + sourceCalendarId,
+        maxResults: (typeof API_PAGE_SIZE !== 'undefined') ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE,
+        pageToken: pageToken
+      });
+    } catch (e) {
+      if (isHttpError(e, 404, 'Not Found')) {
+        console.warn(
+          'Skipping removed mapping cleanup because destination calendar is unavailable: ' +
+          destCalendarId +
+          '; ' +
+          e.message
+        );
+        return metrics;
+      }
+      throw e;
+    }
+
+    if (response.items) {
+      for (const destEvent of response.items) {
+        if (!hasExecutionTimeRemainingMs(1000)) {
+          console.warn('Execution timeout reached during removed mapping item cleanup - stopping');
+          metrics.timedOut = true;
+          break;
+        }
+
+        try {
+          if (removeEventIfExists(destCalendarId, destEvent.id)) {
+            console.log('Removed event from removed mapping: ' + destEvent.id);
+            metrics.deleted++;
+          }
+        } finally {
+          paceCalendarWrite();
+        }
+      }
+    }
+
+    if (metrics.timedOut) {
+      break;
+    }
+
+    pageToken = response.nextPageToken;
+  } while (pageToken);
+
+  return metrics;
+}
+
+/**
  * Execute reconciliation sync when sync token expires or config changes.
  * Builds AllowedSet of events that pass current rules and removes orphaned events.
  *

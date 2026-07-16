@@ -58,7 +58,7 @@ Legend:
 
 | ID | Priority | Area | Scenario | Expected outcome | Automation potential |
 |---|---|---|---|---|---|
-| TP-001 | P0 | Orchestration | Empty `CALENDAR_CONFIG` | Warns and exits; no writes | High |
+| TP-001 | P0 | Orchestration | Empty `CALENDAR_CONFIG` | If no prior managed mappings, warns and exits without sync writes; if prior managed mappings exist, runs removed-mapping cleanup | High |
 | TP-002 | P0 | Orchestration | Lock already held by another run | Warns and exits without syncing | Medium |
 | TP-003 | P0 | Pair isolation | One pair throws unexpected error | Error logged; remaining pairs still processed | Medium |
 | TP-004 | P0 | Calendar resolution | Source/destination by exact calendar ID | Pair resolves and syncs | High |
@@ -87,6 +87,10 @@ Legend:
 | TP-027 | P1 | Timeout guard | Execution budget exhausted mid-run | Warns and stops gracefully without crash | Low |
 | TP-028 | P1 | Write pacing | Multiple write operations in one run | Writes paced; no quota-spike behavior regressions | Low |
 | TP-029 | P1 | API errors | 404 on get/remove, non-404 unexpected errors | 404 paths handled as designed; non-404 surfaces/logged | Medium |
+| TP-030 | P0 | Config removal | Remove one source→destination mapping | Tagged events for that mapping are deleted from destination; pair hash and source token state are cleared | High |
+| TP-031 | P1 | Config removal | Remove all mappings | All events tagged from previously managed mappings are cleaned and registry/state reflects empty config | Medium |
+| TP-032 | P1 | Config removal | Remove then re-add same mapping | Re-added mapping performs clean tokenless sync and re-establishes token/hash/registry state | Medium |
+| TP-033 | P1 | Config removal | First run with no managed registry present | Registry initializes from current config; removed-mapping cleanup starts on subsequent successful runs | Medium |
 
 ## 6. Minimal fixture set for fast regression runs
 
@@ -103,6 +107,7 @@ For repeat manual checks, keep a compact subset:
 9. TP-017 + TP-019 (reconciliation trigger + orphan cleanup)
 10. TP-021 + TP-023 (exception update + missing-master path)
 11. TP-024 (loop guard)
+12. TP-030 (single mapping removal cleanup)
 
 ## 7. Semi-programmatic path
 

@@ -77,9 +77,12 @@ const CALENDAR_CONFIG = [
 `orchestrateCalendarSync()` (Main.gs):
 
 1. Acquires a script lock (`LockService.getScriptLock().tryLock(LOCK_TIMEOUT_MS)`). If the lock cannot be acquired, logs a warning and exits.
-2. Resolves all calendar references once via `resolveCalendarConfig()`.
-3. Iterates over resolved pairs, calling `syncCalendarPair()` for each. Stops if the 5-minute timeout threshold is reached.
-4. Releases the lock in a `finally` block.
+2. Resolves all calendar references once via `resolveCalendarConfig()` and validates unique source mappings.
+3. Computes removed mappings by diffing the current resolved set against the previously managed pair/source registry. If any configured mapping fails resolution, removal cleanup and registry updates are skipped for safety in that run.
+4. Cleans removed mappings by deleting destination events tagged with the removed source in the removed destination.
+5. Iterates over active resolved pairs, calling `syncCalendarPair()` for each. Stops if the 5-minute timeout threshold is reached.
+6. On successful completion, clears stale state (`SYNC_TOKEN_*`, `CONFIG_HASH_*`) for removed mappings and persists the new managed registry snapshot.
+7. Releases the lock in a `finally` block.
 
 ### 4.2 Incremental Sync (normal path)
 
@@ -227,8 +230,11 @@ See §6.2 for derivation.
 |--------------------------------------------------|---------------------------------------------|
 | `SYNC_TOKEN_<encodedSourceCalendarId>`           | Incremental sync token for a source calendar|
 | `CONFIG_HASH_<encodedSrc>_<encodedDest>`         | MD5 of normalized rules for a calendar pair |
+| `MANAGED_CALENDAR_REGISTRY_V1`                   | JSON snapshot of managed pairs/sources      |
 
 Keys use `encodeURIComponent()` on calendar IDs.
+
+`MANAGED_CALENDAR_REGISTRY_V1` is initialized from a successful run of the current configuration. Removal cleanup depends on this snapshot, so mappings removed before the registry is first initialized are not inferred retroactively.
 
 **Config hash computation:** Rules are normalized before hashing via `normalizeConfigForHash()`, which converts RegExp values to their `toString()` representation and sorts object keys for deterministic ordering. Plain `JSON.stringify` is not used alone because it silently drops RegExp values.
 

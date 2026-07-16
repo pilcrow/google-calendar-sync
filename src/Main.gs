@@ -23,13 +23,64 @@ function orchestrateCalendarSync() {
   }
 
   try {
-    if (CALENDAR_CONFIG.length === 0) {
-      console.warn('No calendar mappings configured');
-      return;
+    const resolvedCalendarConfig = resolveCalendarConfig(CALENDAR_CONFIG);
+    if (resolvedCalendarConfig.length === 0) {
+      console.warn('No active calendar mappings configured');
+    }
+    validateUniqueSourceCalendarMappings(resolvedCalendarConfig);
+
+    const hasUnresolvedCalendarMappings = resolvedCalendarConfig.length !== CALENDAR_CONFIG.length;
+    const hasManagedRegistry = hasManagedCalendarStateRegistry();
+    const currentManagedState = buildManagedCalendarStateFromResolvedConfig(resolvedCalendarConfig);
+    const previousManagedState = getManagedCalendarState();
+    let removedCalendarPairs = [];
+    let removedSourceCalendarIds = [];
+
+    if (!hasManagedRegistry) {
+      console.info('Managed calendar registry not found; initializing from current config');
+    } else if (hasUnresolvedCalendarMappings) {
+      console.warn('Skipping removed mapping cleanup because one or more configured mappings could not be resolved');
+    } else {
+      removedCalendarPairs = getRemovedManagedCalendarPairs(previousManagedState.pairs, currentManagedState.pairs);
+      removedSourceCalendarIds = getRemovedManagedSourceCalendarIds(previousManagedState.sources, currentManagedState.sources);
     }
 
-    const resolvedCalendarConfig = resolveCalendarConfig(CALENDAR_CONFIG);
-    validateUniqueSourceCalendarMappings(resolvedCalendarConfig);
+    if (removedCalendarPairs.length > 0) {
+      console.info('Found ' + removedCalendarPairs.length + ' removed calendar mapping(s) to clean');
+    }
+
+    for (const removedPair of removedCalendarPairs) {
+      if (!hasExecutionTimeRemainingMs()) {
+        console.warn('Execution timeout reached during removed mapping cleanup - stopping; sync run will be marked unsuccessful');
+        reachedExecutionTimeout = true;
+        break;
+      }
+
+      try {
+        const cleanupMetrics = cleanupRemovedCalendarPair(
+          removedPair.sourceCalendarId,
+          removedPair.destinationCalendarId
+        );
+        totalMetrics.deleted += cleanupMetrics.deleted || 0;
+        if (cleanupMetrics.timedOut) {
+          reachedExecutionTimeout = true;
+          console.warn('Execution timeout reached during removed mapping cleanup - stopping; sync run will be marked unsuccessful');
+          break;
+        }
+      } catch (e) {
+        hadSyncErrors = true;
+        console.error(
+          'Error cleaning removed calendar mapping ' +
+          removedPair.sourceCalendarId +
+          ' -> ' +
+          removedPair.destinationCalendarId +
+          '; sync run will be marked unsuccessful: ' +
+          e.message
+        );
+        console.error(e.stack);
+      }
+    }
+
     const sourceCalendarCount = new Set(
       resolvedCalendarConfig.map(function(config) {
         return config.sourceCalendarId;
@@ -40,30 +91,46 @@ function orchestrateCalendarSync() {
         return config.destinationCalendarId;
       })
     ).size;
-    
-    for (const config of resolvedCalendarConfig) {
-      if (!hasExecutionTimeRemainingMs()) {
-        console.warn('Execution timeout reached - stopping; sync run will be marked unsuccessful');
-        reachedExecutionTimeout = true;
-        break;
-      }
 
-      try {
-        const pairMetrics = syncCalendarPair(config);
-        if (pairMetrics) {
-          totalMetrics.added += pairMetrics.added || 0;
-          totalMetrics.updated += pairMetrics.updated || 0;
-          totalMetrics.deleted += pairMetrics.deleted || 0;
-          if (pairMetrics.timedOut) {
-            reachedExecutionTimeout = true;
-            console.warn('Execution timeout reached during calendar pair sync - stopping; sync run will be marked unsuccessful');
-            break;
-          }
+    if (!reachedExecutionTimeout) {
+      for (const config of resolvedCalendarConfig) {
+        if (!hasExecutionTimeRemainingMs()) {
+          console.warn('Execution timeout reached - stopping; sync run will be marked unsuccessful');
+          reachedExecutionTimeout = true;
+          break;
         }
-      } catch (e) {
-        hadSyncErrors = true;
-        console.error('Error syncing calendar pair; sync run will be marked unsuccessful: ' + e.message);
-        console.error(e.stack);
+
+        try {
+          const pairMetrics = syncCalendarPair(config);
+          if (pairMetrics) {
+            totalMetrics.added += pairMetrics.added || 0;
+            totalMetrics.updated += pairMetrics.updated || 0;
+            totalMetrics.deleted += pairMetrics.deleted || 0;
+            if (pairMetrics.timedOut) {
+              reachedExecutionTimeout = true;
+              console.warn('Execution timeout reached during calendar pair sync - stopping; sync run will be marked unsuccessful');
+              break;
+            }
+          }
+        } catch (e) {
+          hadSyncErrors = true;
+          console.error('Error syncing calendar pair; sync run will be marked unsuccessful: ' + e.message);
+          console.error(e.stack);
+        }
+      }
+    }
+
+    if (!hadSyncErrors && !reachedExecutionTimeout) {
+      if (hasUnresolvedCalendarMappings) {
+        console.warn('Managed calendar registry/state was not updated because one or more mappings could not be resolved');
+      } else {
+        for (const removedPair of removedCalendarPairs) {
+          clearCalendarPairConfigHash(removedPair.sourceCalendarId, removedPair.destinationCalendarId);
+        }
+        for (const removedSourceCalendarId of removedSourceCalendarIds) {
+          clearSyncToken(removedSourceCalendarId);
+        }
+        setManagedCalendarState(currentManagedState);
       }
     }
 
@@ -110,6 +177,39 @@ function orchestrateCalendarSync() {
   } finally {
     lock.releaseLock();
   }
+}
+
+function getRemovedManagedCalendarPairs(previousPairs, currentPairs) {
+  const currentPairSet = {};
+  for (const pair of currentPairs) {
+    currentPairSet[getManagedCalendarPairKey(pair.sourceCalendarId, pair.destinationCalendarId)] = true;
+  }
+
+  const removedPairs = [];
+  for (const pair of previousPairs) {
+    const pairKey = getManagedCalendarPairKey(pair.sourceCalendarId, pair.destinationCalendarId);
+    if (!currentPairSet[pairKey]) {
+      removedPairs.push(pair);
+    }
+  }
+
+  return removedPairs;
+}
+
+function getRemovedManagedSourceCalendarIds(previousSourceCalendarIds, currentSourceCalendarIds) {
+  const currentSourceSet = {};
+  for (const sourceCalendarId of currentSourceCalendarIds) {
+    currentSourceSet[sourceCalendarId] = true;
+  }
+
+  const removedSourceCalendarIds = [];
+  for (const sourceCalendarId of previousSourceCalendarIds) {
+    if (!currentSourceSet[sourceCalendarId]) {
+      removedSourceCalendarIds.push(sourceCalendarId);
+    }
+  }
+
+  return removedSourceCalendarIds;
 }
 
 /**

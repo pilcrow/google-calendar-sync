@@ -4,6 +4,7 @@
 // Use 5 minutes of Apps Script's default 6-minute execution limit.
 const EXECUTION_TIMEOUT_MS = 300000;
 const EXECUTION_START_MS = Date.now();
+const MANAGED_CALENDAR_REGISTRY_KEY = 'MANAGED_CALENDAR_REGISTRY_V1';
 
 function hasExecutionTimeRemainingMs(minimumRemainingMs) {
   return Date.now() - EXECUTION_START_MS < EXECUTION_TIMEOUT_MS - (minimumRemainingMs || 0);
@@ -85,6 +86,115 @@ function validateUniqueSourceCalendarMappings(resolvedCalendarConfig) {
       duplicateMessages.join('; ')
     );
   }
+}
+
+function getManagedCalendarPairKey(sourceCalendarId, destinationCalendarId) {
+  return JSON.stringify([sourceCalendarId, destinationCalendarId]);
+}
+
+/**
+ * Build normalized managed-state arrays from resolved calendar config.
+ *
+ * @param {Object[]} resolvedCalendarConfig - Resolved mappings with calendar IDs
+ * @return {Object} Managed state with pairs and sources arrays
+ */
+function buildManagedCalendarStateFromResolvedConfig(resolvedCalendarConfig) {
+  const pairMap = {};
+  const sourceSet = {};
+
+  for (const config of resolvedCalendarConfig) {
+    const pairKey = getManagedCalendarPairKey(config.sourceCalendarId, config.destinationCalendarId);
+    if (!pairMap[pairKey]) {
+      pairMap[pairKey] = {
+        sourceCalendarId: config.sourceCalendarId,
+        destinationCalendarId: config.destinationCalendarId
+      };
+    }
+    sourceSet[config.sourceCalendarId] = true;
+  }
+
+  const pairs = Object.keys(pairMap).sort().map(function(pairKey) {
+    return pairMap[pairKey];
+  });
+  const sources = Object.keys(sourceSet).sort();
+
+  return {
+    pairs: pairs,
+    sources: sources
+  };
+}
+
+function normalizeManagedCalendarState(managedState) {
+  const normalizedState = managedState || {};
+  const pairMap = {};
+  const sourceSet = {};
+
+  const pairs = Array.isArray(normalizedState.pairs) ? normalizedState.pairs : [];
+  for (const pair of pairs) {
+    if (!pair || typeof pair.sourceCalendarId !== 'string' || typeof pair.destinationCalendarId !== 'string') {
+      continue;
+    }
+
+    const pairKey = getManagedCalendarPairKey(pair.sourceCalendarId, pair.destinationCalendarId);
+    if (!pairMap[pairKey]) {
+      pairMap[pairKey] = {
+        sourceCalendarId: pair.sourceCalendarId,
+        destinationCalendarId: pair.destinationCalendarId
+      };
+    }
+    sourceSet[pair.sourceCalendarId] = true;
+  }
+
+  const sources = Array.isArray(normalizedState.sources) ? normalizedState.sources : [];
+  for (const sourceCalendarId of sources) {
+    if (typeof sourceCalendarId === 'string') {
+      sourceSet[sourceCalendarId] = true;
+    }
+  }
+
+  return {
+    pairs: Object.keys(pairMap).sort().map(function(pairKey) {
+      return pairMap[pairKey];
+    }),
+    sources: Object.keys(sourceSet).sort()
+  };
+}
+
+/**
+ * Get the managed calendar state snapshot from user properties.
+ *
+ * @return {Object} Managed state with pairs and sources arrays
+ */
+function getManagedCalendarState() {
+  const props = PropertiesService.getUserProperties();
+  const rawRegistry = props.getProperty(MANAGED_CALENDAR_REGISTRY_KEY);
+
+  if (!rawRegistry) {
+    return { pairs: [], sources: [] };
+  }
+
+  try {
+    return normalizeManagedCalendarState(JSON.parse(rawRegistry));
+  } catch (e) {
+    console.warn('Ignoring invalid managed calendar registry state: ' + e.message);
+    return { pairs: [], sources: [] };
+  }
+}
+
+function hasManagedCalendarStateRegistry() {
+  const props = PropertiesService.getUserProperties();
+  return props.getProperty(MANAGED_CALENDAR_REGISTRY_KEY) !== null;
+}
+
+/**
+ * Persist the managed calendar state snapshot to user properties.
+ *
+ * @param {Object} managedState - Managed state with pairs and sources arrays
+ */
+function setManagedCalendarState(managedState) {
+  const props = PropertiesService.getUserProperties();
+  const normalizedState = normalizeManagedCalendarState(managedState);
+  props.setProperty(MANAGED_CALENDAR_REGISTRY_KEY, JSON.stringify(normalizedState));
 }
 
 /**
@@ -244,7 +354,7 @@ function generateMd5Hash(text) {
  */
 function getSyncToken(sourceCalendarId) {
   const props = PropertiesService.getUserProperties();
-  const key = 'SYNC_TOKEN_' + encodeURIComponent(sourceCalendarId);
+  const key = getSyncTokenPropertyKey(sourceCalendarId);
   return props.getProperty(key);
 }
 
@@ -256,8 +366,23 @@ function getSyncToken(sourceCalendarId) {
  */
 function setSyncToken(sourceCalendarId, syncToken) {
   const props = PropertiesService.getUserProperties();
-  const key = 'SYNC_TOKEN_' + encodeURIComponent(sourceCalendarId);
+  const key = getSyncTokenPropertyKey(sourceCalendarId);
   props.setProperty(key, syncToken);
+}
+
+/**
+ * Remove the stored sync token for a specific source calendar.
+ *
+ * @param {string} sourceCalendarId - The source calendar identifier
+ */
+function clearSyncToken(sourceCalendarId) {
+  const props = PropertiesService.getUserProperties();
+  const key = getSyncTokenPropertyKey(sourceCalendarId);
+  props.deleteProperty(key);
+}
+
+function getSyncTokenPropertyKey(sourceCalendarId) {
+  return 'SYNC_TOKEN_' + encodeURIComponent(sourceCalendarId);
 }
 
 /**
@@ -294,7 +419,7 @@ function normalizeConfigForHash(value) {
  */
 function getCalendarPairConfigHash(sourceCalendarId, destCalendarId) {
   const props = PropertiesService.getUserProperties();
-  const key = 'CONFIG_HASH_' + encodeURIComponent(sourceCalendarId) + '_' + encodeURIComponent(destCalendarId);
+  const key = getCalendarPairConfigHashPropertyKey(sourceCalendarId, destCalendarId);
   return props.getProperty(key);
 }
 
@@ -308,8 +433,24 @@ function getCalendarPairConfigHash(sourceCalendarId, destCalendarId) {
 function setCalendarPairConfigHash(sourceCalendarId, destCalendarId, rules) {
   const hash = generateMd5Hash(JSON.stringify(normalizeConfigForHash(rules)));
   const props = PropertiesService.getUserProperties();
-  const key = 'CONFIG_HASH_' + encodeURIComponent(sourceCalendarId) + '_' + encodeURIComponent(destCalendarId);
+  const key = getCalendarPairConfigHashPropertyKey(sourceCalendarId, destCalendarId);
   props.setProperty(key, hash);
+}
+
+/**
+ * Remove the stored rules hash for a specific calendar pair.
+ *
+ * @param {string} sourceCalendarId - The source calendar identifier
+ * @param {string} destCalendarId - The destination calendar identifier
+ */
+function clearCalendarPairConfigHash(sourceCalendarId, destCalendarId) {
+  const props = PropertiesService.getUserProperties();
+  const key = getCalendarPairConfigHashPropertyKey(sourceCalendarId, destCalendarId);
+  props.deleteProperty(key);
+}
+
+function getCalendarPairConfigHashPropertyKey(sourceCalendarId, destCalendarId) {
+  return 'CONFIG_HASH_' + encodeURIComponent(sourceCalendarId) + '_' + encodeURIComponent(destCalendarId);
 }
 
 /**
