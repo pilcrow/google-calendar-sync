@@ -363,7 +363,14 @@ function cleanupRemovedCalendarPair(sourceCalendarId, destCalendarId) {
 
         try {
           if (removeEventIfExists(destCalendarId, destEvent.id)) {
-            console.log('Removed event from removed mapping: ' + destEvent.id);
+            console.log(
+              'Removed destination event during removed mapping cleanup eventId=' +
+              destEvent.id +
+              ' sourceCalendarId=' +
+              sourceCalendarId +
+              ' destCalendarId=' +
+              destCalendarId
+            );
             metrics.deleted++;
           }
         } finally {
