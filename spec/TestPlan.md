@@ -58,7 +58,7 @@ Legend:
 
 | ID | Priority | Area | Scenario | Expected outcome | Automation potential |
 |---|---|---|---|---|---|
-| TP-001 | P0 | Orchestration | Empty `CALENDAR_CONFIG` | If no prior managed mappings, warns and exits without sync writes; if prior managed mappings exist, runs removed-mapping cleanup | High |
+| TP-001 | P0 | Orchestration | Empty `CALENDAR_CONFIG` | If no prior managed mappings, warns and exits without sync writes; if prior managed mappings exist and mappings resolve successfully, runs removed-mapping cleanup | High |
 | TP-002 | P0 | Orchestration | Lock already held by another run | Warns and exits without syncing | Medium |
 | TP-003 | P0 | Pair isolation | One pair throws unexpected error | Error logged; remaining pairs still processed | Medium |
 | TP-004 | P0 | Calendar resolution | Source/destination by exact calendar ID | Pair resolves and syncs | High |
@@ -109,9 +109,9 @@ For repeat manual checks, keep a compact subset:
 11. TP-024 (loop guard)
 12. TP-030 (single mapping removal cleanup)
 
-## 7. Semi-programmatic path
+## 7. Semi-programmatic path (planned, not yet implemented)
 
-Start with a lightweight assertion harness (helper functions callable from Apps Script IDE):
+Start with a lightweight assertion harness (helper functions callable from Apps Script IDE). These helper functions are proposed for future implementation:
 
 1. `listDestinationEventsBySource(sourceCalendarId)` using `privateExtendedProperty`.
 2. `getSyncState(sourceCalendarId, destCalendarId)` returning token/hash values.

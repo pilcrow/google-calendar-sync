@@ -1,7 +1,6 @@
 # Design: Google Calendar Sync
 
 Authoritative technical reference for the Google Apps Script calendar sync engine.
-Supersedes `Design-and-Task-Plan.md`, `File-Structure.md`, and `Addenda-Loop-Protection.md`.
 
 ---
 
@@ -9,7 +8,7 @@ Supersedes `Design-and-Task-Plan.md`, `File-Structure.md`, and `Addenda-Loop-Pro
 
 ### Hub-and-Spoke
 
-Multiple source calendars sync one-way into a single destination calendar. Each source→destination pair is configured independently in `CALENDAR_CONFIG`. Pairs are processed sequentially within each trigger execution.
+Multiple source calendars sync one-way into one or more destination calendars. Each source→destination pair is configured independently in `CALENDAR_CONFIG`, and each source calendar must be unique across entries. Pairs are processed sequentially within each trigger execution.
 
 ### File Structure
 
@@ -42,7 +41,7 @@ Avoid inline comments that restate what the code already clearly expresses.
 `Config.gs` declares:
 
 ```javascript
-const API_PAGE_SIZE = 250;      // Google Calendar API maximum page size
+const API_PAGE_SIZE = 250;      // Optional override (max 250)
 
 const CALENDAR_CONFIG = [
   {
@@ -56,7 +55,7 @@ const CALENDAR_CONFIG = [
 ];
 ```
 
-`API_PAGE_SIZE` is used for all `Calendar.Events.list` and `Calendar.CalendarList.list` calls. 250 is the Google-documented maximum for both.
+`API_PAGE_SIZE` is optional. If it is undefined, runtime falls back to `DEFAULT_API_PAGE_SIZE` (250). The value is used for all `Calendar.Events.list` and `Calendar.CalendarList.list` calls.
 
 ---
 
@@ -86,7 +85,7 @@ const CALENDAR_CONFIG = [
 
 ### 4.2 Incremental Sync (normal path)
 
-`performIncrementalSync()` uses the stored `syncToken` to fetch only changed events since the last run. For each page of results, calls `processSyncItem()`. Persists the new `syncToken` on completion and logs duration + event metrics (`# added, # updated, # deleted`).
+`performIncrementalSync()` uses the stored `syncToken` to fetch only changed events since the last run. For each page of results, calls `processSyncItem()`. Persists the new `syncToken` only on successful completion (no timeout) and logs duration + event metrics (`# added, # updated, # deleted`).
 
 If no `syncToken` is stored (first run for this source), delegates to `syncSourceWindow()` instead.
 
@@ -94,7 +93,7 @@ If no `syncToken` is stored (first run for this source), delegates to `syncSourc
 
 Triggered by:
 - `HTTP 410 Gone` — sync token expired
-- Rules change detected with a stored sync token — `checkCalendarPairConfigChange()` returns true and a sync token exists. If rules changed but no sync token is stored, the code falls through to `syncSourceWindow()`, which upserts current source events and writes the new config hash but **skips orphan cleanup** — previously synced events that now match a skip rule are not removed from the destination until a reconciliation is later triggered.
+- Rules change detected with a stored sync token — `checkCalendarPairConfigChange()` returns true and a sync token exists. If rules changed but no sync token is stored, the code falls through to `syncSourceWindow()`, which upserts current source events, removes in-window items that now match `skip`, and writes the new config hash, but **skips orphan cleanup**.
 
 `executeReconciliationSync()`:
 
@@ -110,7 +109,7 @@ Triggered by:
 `syncSourceWindow()` (SyncEngine.gs) performs a tokenless `[now − LOOKBACK_DAYS, ∞)` scan:
 
 - Per page, partitions events into masters and exceptions, then processes masters first, exceptions second (see §6).
-- Persists the fresh `syncToken` and updates the config hash on completion.
+- Persists the fresh `syncToken` and updates the config hash only on successful completion (no timeout).
 - Logs duration + event metrics.
 
 ---
@@ -121,8 +120,8 @@ Triggered by:
 
 1. **Loop guard:** If `item.extendedProperties?.private?.sourceCalendarId` is set, the event is a sync replica — log a warning and return. (See §10.)
 2. **Exception routing:** If `item.recurringEventId` is set, delegate to `processExceptionSyncItem()`.
-3. **Cancellation:** If `item.status === 'cancelled'`, remove the destination event (ignore 404).
-4. **Rule evaluation:** Run `evaluateRules(item.summary, config.rules)`. If `skip`, remove the destination event (ignore 404).
+3. **Cancellation:** If `item.status === 'cancelled'`, remove the destination event (ignore 404/410).
+4. **Rule evaluation:** Run `evaluateRules(item.summary, config.rules)`. If `skip`, remove the destination event (ignore 404/410).
 5. **Upsert:** Build destination payload via `buildDestinationEvent()`. Attempt `Calendar.Events.get()`; on success use `update()`, on 404 use `insert()`.
 
 ### 5.2 `buildDestinationEvent()` — Outbound Field Allowlist
@@ -170,7 +169,7 @@ Before updating the destination exception, `processExceptionSyncItem()` verifies
 3. Calls `processSyncItem()` on the source master to create it on the destination.
 
 **Sort order (masters before exceptions):**
-In `syncSourceWindow()`, each page of results is partitioned into masters and exceptions buckets; masters are processed first. This ensures the destination master exists before exception processing for the same page.
+In `syncSourceWindow()`, each page of results is partitioned into masters and exceptions buckets; masters are processed first. This ordering guarantee is per page (not global across pages); the on-demand master sync path handles cross-page master/exception ordering.
 
 **Exception rule evaluation:**
 Each exception's summary is evaluated independently — the master's rule result is not inherited:
@@ -269,7 +268,7 @@ A parallel check in `executeReconciliationSync()` emits the same warning with an
 
 - **Script lock:** `LockService.getScriptLock().tryLock(LOCK_TIMEOUT_MS)` (30 000 ms) — if another instance holds the lock, the current execution exits immediately with a warning.
 - **`EXECUTION_TIMEOUT_MS`** (300 000 ms) — 5-minute safety threshold within Apps Script's 6-minute hard limit.
-- **`LOOKBACK_DAYS`** (7) — how far back tokenless syncs and reconciliation query. Events older than 7 days before the current run are outside the cleanup window.
+- **`LOOKBACK_DAYS`** (7) — how far back source-side tokenless sync and reconciliation AllowedSet queries look. Events older than 7 days are not directly scanned in tokenless source-window sync.
 - **`EXECUTION_START_MS`** — set at module load time. Used only for timeout checks via `hasExecutionTimeRemainingMs()`, not for user-visible elapsed time (which uses a locally captured `Date.now()` after lock acquisition).
 - **`hasExecutionTimeRemainingMs(minimumRemainingMs)`** — returns false if the remaining execution budget is less than `minimumRemainingMs`.
 - **`WRITE_PACING_DELAY_MS`** (500 ms) — inserted after each calendar write API call to reduce quota pressure. Skipped if insufficient time remains.
@@ -282,7 +281,7 @@ A parallel check in `executeReconciliationSync()` emits the same warning with an
 |-----------------------------------------|--------------------------------------------------------------------|
 | `HTTP 410 Gone`                         | Sync token expired — trigger reconciliation sync                   |
 | `HTTP 404 Not Found` on event get       | Event absent from destination — use `insert()` instead of `update()` |
-| `HTTP 404 Not Found` on event remove    | Event already gone — silently ignored                              |
+| `HTTP 404/410` on event remove          | Event already gone — silently ignored                              |
 | `item.status === 'cancelled'`           | Remove from destination calendar                                   |
 | Calendar reference resolution failure   | `console.warn`, skip the pair, continue with remaining pairs       |
 | Unexpected error in `syncCalendarPair()`| Logged at `console.error`; remaining pairs continue                |
@@ -301,8 +300,8 @@ A parallel check in `executeReconciliationSync()` emits the same warning with an
 
 ### Multi-destination fan-out
 
-Sync tokens are keyed by source calendar only (`SYNC_TOKEN_[encodedSourceCalendarId]`). Whether syncing one source to two destinations would corrupt the incremental state of either pair is unanalyzed. Do not configure the same source calendar in more than one `CALENDAR_CONFIG` entry until this is resolved.
+Sync tokens are keyed by source calendar only (`SYNC_TOKEN_[encodedSourceCalendarId]`). The implementation enforces one-to-one source mapping: `validateUniqueSourceCalendarMappings()` rejects any configuration where the same source appears in more than one `CALENDAR_CONFIG` entry.
 
-### Skip-filtered exception restoration
+### Tokenless skip-filter cleanup scope
 
-If a recurring event exception was previously synced and a rule change causes it to be skipped, `processExceptionSyncItem()` removes it from the destination. The underlying recurring series slot is not explicitly restored to the master's definition — the reconciliation sync (which the rule change triggers) handles cleanup via the AllowedSet mechanism. Between rule change and reconciliation, the slot remains absent from the destination.
+If recurring items were previously synced and later become skip-filtered, they are removed when processed. The key limitation is tokenless source-window behavior: `syncSourceWindow()` processes only the `[now − LOOKBACK_DAYS, ∞)` window and does not run orphan cleanup, so previously synced destination items not represented in that source window may remain until reconciliation.

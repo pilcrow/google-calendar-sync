@@ -1,13 +1,13 @@
 # Google Calendar Sync
 
-One-way synchronization from one or more Google Calendars into a single destination calendar, using Google Apps Script. Events are filtered and labeled using configurable rules matched against event titles.
+One-way synchronization from one or more Google Calendars into one or more destination calendars, using Google Apps Script. Events are filtered and labeled using configurable rules matched against event titles.
 
 For architecture and implementation details, see [spec/Design.md](spec/Design.md).
 
 ## How It Works
 
 The script runs on a 15-minute time-driven trigger. It uses Google Calendar's incremental sync (`syncToken`) to process only changed events, preserving recurring event structure. Each source→destination mapping is independent and rule-driven.
-After the managed mapping registry is initialized, removing a mapping from `CALENDAR_CONFIG` cleans previously synced events for that mapping from the destination calendar and clears related sync state.
+If you remove a mapping from `CALENDAR_CONFIG`, the script removes events it previously copied for that mapping and clears saved sync state for that pair. As a safety guard, if any configured calendar name/ID cannot be resolved in a run, mapping-removal cleanup is skipped for that run to avoid deleting events from a partially-resolved configuration.
 
 ## Prerequisites
 
@@ -91,5 +91,5 @@ In the Apps Script IDE: **Triggers → Add Trigger**:
 
 ## Limitations
 
-- **One-to-one source mapping only:** The same source calendar must not appear in more than one `CALENDAR_CONFIG` entry. Sync tokens are keyed by source only, so fan-out is unsupported. The script validates this at startup and aborts if duplicates are configured.
-- **Skip-filtered exception cleanup:** If a recurring event exception is later excluded by a rule change, it is removed during the next reconciliation sync (which the rule change triggers automatically), not immediately during incremental sync.
+- **One-to-one source mapping only:** The same source calendar must not appear in more than one `CALENDAR_CONFIG` entry. Sync tokens are keyed by source only, so fan-out is unsupported. The script validates this at startup and exits the run with an error if duplicates are configured.
+- **Skip-filtered items outside the lookback window may linger temporarily:** Events that match `skip` are removed when the script processes them. In runs that scan only the lookback window (default: last 7 days plus future), previously copied older events may remain until a later consistency-cleanup pass removes them.

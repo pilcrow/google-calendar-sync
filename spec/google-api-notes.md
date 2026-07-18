@@ -17,12 +17,12 @@ See `spec/Design.md` for implementation-level behavior and invariants.
 ## Quota-aware practices for contributors
 
 1. Prefer incremental sync with persisted state over repeated full-window scans.
-2. Keep API page size high enough to reduce request count (`API_PAGE_SIZE`, currently 250).
+2. Keep API page size high enough to reduce request count (`API_PAGE_SIZE`; default runtime fallback is 250 when unset).
 3. Handle retriable quota/rate-limit errors explicitly when adding new write-heavy paths.
 4. Keep idempotent deterministic IDs so retries do not create duplicates.
 5. Preserve graceful timeout exits so partial progress can resume on next trigger.
 
-## If adding webhook or web app ingestion later
+## Future work: if adding webhook or web app ingestion later
 
 The current architecture is trigger-driven, not webhook-driven. If webhook ingestion is introduced:
 
