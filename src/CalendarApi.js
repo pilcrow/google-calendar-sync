@@ -17,11 +17,11 @@ const CAL_OPS = {};
  *
  * @param {string} calendarId - The calendar which we're about to modify
  */
-function _paceCalendarWrite = (function() {
+const _paceCalendarWrite = (function() {
   let LAST_WRITE_OP = {};
 
   return function(calendarId) {
-    const now = Date.now;
+    const now = Date.now();
     const elapsedSinceLastWrite = now - (LAST_WRITE_OP[calendarId] ||= 0);
     let zzz = 0;
     if (elapsedSinceLastWrite < 500) {
@@ -31,6 +31,27 @@ function _paceCalendarWrite = (function() {
     LAST_WRITE_OP[calendarId] = now + zzz;
   }
 })();
+
+/**
+ * Fetch a single event by ID, or return null if the API reports it absent (404).
+ *
+ * Deliberately status-agnostic: a soft-deleted (cancelled) event still resolves
+ * — GET returns 200 with `status: 'cancelled'` — so a non-null result is not
+ * proof the event is active.  Callers needing "active" semantics must check
+ * `status` themselves.
+ *
+ * @param {string} calendarId - The calendar possibly containing the event
+ * @param {string} eventId - The event to fetch
+ * @return {Object|null} The event resource regardless of status, or null on 404
+ */
+function calGetEvent(calendarId, eventId) {
+  try {
+    return Calendar.Events.get(calendarId, eventId);
+  } catch (e) {
+    if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
+  }
+  return null;
+}
 
 /**
  * Remove the given eventId from the specified calendar, ignoring already absent events.
@@ -44,7 +65,7 @@ function calRemoveEvent(calendarId, eventId) {
 
   try {
     _paceCalendarWrite(calendarId);
-    Calendar.Events.delete(calendarId, eventId);
+    Calendar.Events.remove(calendarId, eventId);
     CAL_OPS[calendarId].removed++;
     return true;
   } catch (e) {
@@ -66,18 +87,31 @@ function calUpsertEvent(calendarId, event) {
   CAL_OPS[calendarId] ||= { ...DEFAULT_CAL_OPS_ENTRY };
 
   try {
-    existing = Calendar.Events.get(calendarId, event.id)
+    const existing = Calendar.Events.get(calendarId, event.id)
     _paceCalendarWrite(calendarId);
-    Calendar.Events.update({ ...event, ...{ etag: existing.etag } }, calendarId, event.id)
+    Calendar.Events.update(event, calendarId, event.id, {}, { 'If-Match': existing.etag });
     CAL_OPS[calendarId].updated++;
   } catch (e) {
-    if (! isHttpError(404, 'Not Found')) {
-      throw e;
-    }
+    if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
+
     _paceCalendarWrite(calendarId);
-    Calendar.Events.insert(event, calendarId);
+    Calendar.Events.insert(event, calendarId); // FIXME - skip exception events
     CAL_OPS[calendarId].added++;
   }
+}
+
+/**
+ * Replace a given event on the calendar, overwriting any previous version.
+ * Useful for creating exception instances.
+ *
+ * @param {string} calendarId - The calendar possibly containing the event
+ * @param {Object} event - The event to be updated
+ */
+function calReplaceEvent(calendarId, event) {
+  CAL_OPS[calendarId] ||= { ...DEFAULT_CAL_OPS_ENTRY };
+
+  Calendar.Events.update(event, calendarId, event.id);
+  CAL_OPS[calendarId].updated++;
 }
 
 /**
@@ -89,27 +123,24 @@ function calUpsertEvent(calendarId, event) {
 
 /**
  * Stream the given calendar's events to the given callback, including cancelled events, one
- * at a time.  The search parameters are the same as for Calendar.Events.list, but this
- * function handles paging automatically.
+ * at a time.  The search parameters are the same as for Calendar.Events.list, but this function
+ * handles paging automatically.
  *
  * @param {string} calendarId - The calendar to search
- * @param {Object} calendarId - Search parameters as for Calendar.Events.List
+ * @param {Object} params - Search parameters as for Calendar.Events.List
  * @param callback - The function to call
  * @return {string} - The syncToken to interrogate the calendar for changes
  */
 function calStreamEvents(calendarId, params = {}, callback = null) {
-  const params = { ...options, ...{ showDeleted: true, maxResults: FIXME, pageToken: pageToken } };
-  let pageToken = null;
+  let nextSyncToken = null; // return value
   let response = null;
 
-  do {
-    if (!haveExecutionTimeRemainingMs()) {
-      console.warn('Execution timeout reached during calendar list');
-      return;
-    }
+  const searchParams = { ...params };
+  delete searchParams.pageToken;
 
+  do {
     try {
-      response = Calendar.Events.list(calendarId, options)
+      response = Calendar.Events.list(calendarId, searchParams);
     } catch (e) {
       if (isHttpError(e, 404, 'Not Found')) {
         console.warn('Calendar not found');
@@ -118,10 +149,12 @@ function calStreamEvents(calendarId, params = {}, callback = null) {
       throw e;
     }
 
-    response.items.forEach(event => callback(event));
+    if (response.items) {
+      response.items.forEach(event => callback(event));
+    }
 
-    pageToken = response.nextPageToken;
-  } while (pageToken)
+    searchParams.pageToken = response.nextPageToken;
+  } while (searchParams.pageToken);
 
   return response?.nextSyncToken;
 }

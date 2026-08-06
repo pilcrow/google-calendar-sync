@@ -273,6 +273,19 @@ function resolveCalendarReference(calendarReference, calendarLookup) {
   return matchingIds[0];
 }
 
+// FIXME - GoogleJsonResponseException are well-structured
+//
+//  { [GoogleJsonResponseException: API call to calendar.events.delete failed with error: Not Found]
+//  details: { message: 'Not Found', errors: [ [Object] ], code: 404 },
+//  name: 'GoogleJsonResponseException' }
+
+function isGoogleJsonResponseErr(err, ...codes) {
+  if (err.details?.code) {
+    return codes.includes(err.details.code);
+  }
+  return false;
+}
+
 function isHttpError(error, statusCode, fallbackText) {
   const message = String((error && (error.message || error)) || '');
   const statusPattern = new RegExp('\\b' + String(statusCode) + '\\b');
