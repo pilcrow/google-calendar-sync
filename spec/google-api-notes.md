@@ -14,6 +14,13 @@ These notes are intentionally non-authoritative. Quotas and limits can vary by a
 
 See `spec/Design.md` for implementation-level behavior and invariants.
 
+## Recurring event exception instances
+
+- The Events resource schema marks `recurringEventId` and `originalStartTime` **Immutable**, but annotates the nested `originalStartTime.date/dateTime/timeZone` sub-fields writable; the `events.insert` reference likewise lists `originalStartTime.date/dateTime/timeZone` as writable request-body properties and does not list `recurringEventId` at all. These annotations are internally inconsistent; treat them as unreliable for the exception flow.
+- An exception is created or cancelled by addressing the instance and calling `events.update()` on it (the retrieve-then-update flow the recurring-events guide documents). On a calendar where the master series exists, every instance is addressable by its ID `<masterId>_<originalStartTime>` — including instances that are still derived (not yet exceptions) — so an update on that ID materializes the exception. This project's exception flow is update-only (`processExceptionSyncItem()` in `src/SyncEngine.gs`). Inserting with `recurringEventId`/`originalStartTime` set and `id` omitted is an alternative some sync tooling uses, but the current reference does not list `recurringEventId` as a writable insert property, and this project does not rely on it. The recurring-events guide's cancel example echoes `recurringEventId`/`originalStartTime` back in the PUT body only because it sends a full instance representation.
+- The base32hex custom-ID rule (`[a-v0-9]`, length 5-1024) constrains only IDs supplied by the caller to `events.insert`. Google-generated IDs are exempt and legitimately contain underscores (`<masterId>_<timestamp>`); instance IDs are therefore never provided to insert — destination instances are addressed by their computed ID and updated in place, never inserted (see Design.md §6.2).
+- Instance IDs follow `<masterId>_<timestamp>`. Source event IDs can themselves contain underscores (imported `c_...` IDs), so exception suffix extraction must slice at the master ID length, not split on `_`.
+
 ## Quota-aware practices for contributors
 
 1. Prefer incremental sync with persisted state over repeated full-window scans.

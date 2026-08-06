@@ -132,13 +132,13 @@ Only the following fields are written to destination events. Arbitrary source fi
 |--------------------------------|-----------------------------------------------|
 | `summary`                      | Rule prefix prepended                         |
 | `description`, `location`      | Copied as-is                                  |
-| `start`, `end`                 | Only `date`, `dateTime`, `timeZone` sub-fields|
+| `start`, `end`                 | `date`/`dateTime`/`timeZone` are the only keys (all writable), so copying the object as-is is equivalent to a sub-field allowlist. Omit the field when the source value is empty or absent; never send `{}`. |
 | `transparency`, `visibility`   | Copied as-is                                  |
 | `colorId`                      | From rule result; omitted if rule returns null|
 | `recurrence`                   | Master events only (shallow copy of array)    |
 | `extendedProperties.private`   | `sourceCalendarId`, `sourceEventId`           |
 
-`recurringEventId` and `originalStartTime` are read-only API fields and are intentionally excluded.
+`recurringEventId` and `originalStartTime` are intentionally excluded: destination instances are addressed by their computed ID (§6.2), so neither field belongs in a payload. The event-level fields the allowlist genuinely guards against are the read-only/server-set ones — `id`, `etag`, `created`, `updated`, `creator`, `organizer`, `htmlLink`, `hangoutLink`, `iCalUID` — plus `attendees`, which is deliberately not copied. (The API schema marks `recurringEventId`/`originalStartTime` Immutable, with conflicting `events.insert` annotations; see `spec/google-api-notes.md`.)
 
 ---
 
@@ -160,6 +160,11 @@ destInstanceId = destMasterId + '_' + sourceSuffix
 ```
 
 where `destMasterId = getDestinationEventId(sourceCalendarId, item.recurringEventId)` and `sourceSuffix = item.id.slice(item.recurringEventId.length + 1)`. The `getDestinationInstanceId()` utility encapsulates this.
+
+The suffix must be derived by slicing at `recurringEventId.length + 1`, never by splitting the ID on `_`: source event IDs (e.g. imported `c_...` IDs) can themselves contain underscores, and a split-based derivation corrupts both the master prefix and the timestamp suffix.
+
+**Instances are updated, never inserted.**
+Once the destination master series exists, every destination instance is derived from it and addressable by its computed ID `destMasterId_<timestamp>`; `Calendar.Events.update()` on that ID materializes the exception (the documented retrieve-then-update flow). This is what the existing working engine does: `processExceptionSyncItem()` (`src/SyncEngine.gs`) updates the computed instance ID directly and has no insert path for exceptions. The API's base32hex custom-ID charset (`[a-v0-9]`, no underscores) constrains only IDs the caller supplies — Google-generated instance IDs contain underscores — so it is not the operative constraint here; an exception needs no custom ID because it is addressed as an instance of the destination master. `insert()` is used only for non-exception events, with a deterministic `gcs`-prefixed ID. The destination master must therefore exist before any exception is synced (see below). A skipped or cancelled exception is removed from the destination by its computed instance ID — matching `processExceptionSyncItem()`'s cancel/skip path — never inserted.
 
 **On-demand master sync:**
 Before updating the destination exception, `processExceptionSyncItem()` verifies the destination master exists via `Calendar.Events.get()`. If the master is absent (404):
@@ -218,6 +223,8 @@ destInstanceId = destMasterId + '_' + sourceSuffix
 ```
 
 See §6.2 for derivation.
+
+`sourceSuffix` is derived by slicing at the master ID length, never by splitting the source ID on `_` (source IDs can contain underscores; see §6.2).
 
 ---
 
