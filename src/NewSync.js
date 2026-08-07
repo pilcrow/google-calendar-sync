@@ -20,7 +20,7 @@ function _makeDestId(calendarId, baseId, instanceSuffix = '') {
   // naively embed, e.g. base32(calId + '::' + eId).
 
   // FIXME - magic string
-  let destId = 'gcs' + generateMd5Hash(calendarId + '::' + baseId);
+  const destId = 'gcs' + generateMd5Hash(calendarId + '::' + baseId);
   if (instanceSuffix) {
     destId += ('_' + instanceSuffix)
   }
@@ -69,15 +69,14 @@ function buildDestReplica(sourceEvent, config) {
 
   if (sourceEvent.recurrence) {
     destEvent.recurrence = [ ...sourceEvent.recurrence ];
-  } 
+  }
 
   if (rulesResult.colorId != null) {
     destEvent.colorId = rulesResult.colorId;
   }
 
   if (sourceEvent.recurringEventId) {
-    // if (! sourceEvent.id.startsWith(sourceEvent.recurringEventId + '_')) throw new Error
-    const instanceSuffix = sourceEvent.id.slice(sourceEvent.recurringEventId.length + 1); 
+    const instanceSuffix = sourceEvent.id.slice(sourceEvent.recurringEventId.length + 1);
     destEvent.id = _makeDestId(config.sourceId, sourceEvent.recurringEventId, instanceSuffix);
   } else {
     destEvent.id = _makeDestId(config.sourceId, sourceEvent.id);
@@ -121,16 +120,30 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
 
   const destEvent = buildDestReplica(sourceEvent, config);
 
-  try {
+  // Apply a dest-side exception: replace a confirmed exception, or remove a
+  // cancelled one.  Returns true when fully handled (cancelled: removed or
+  // already gone), false when replaced and still to be reported via onSync.
+  //
+  // toleratedErrors only affects the cancelled branch.  The first attempt
+  // passes [410] to *raise* 404s: on a recurring series, remove() of an
+  // instance of an existing master always succeeds, so a 404 here means the
+  // parent master is absent from the dest cal — and a later orphaned sibling
+  // exception that is *not* cancelled (like a reschedule) might pull in the
+  // absent parent, so our cancels can't be themselves omitted — they need to
+  // appear on the dest cal.  The retry uses the default [404, 410]: the parent
+  // was just materialized, so a 404 is anomalous and safe to ignore.
+  const applyException = (toleratedErrors = [404, 410]) => {
     if (destEvent.status === 'cancelled') {
-      // Raise 404s, since a later orphaned sibling exception that is *not* cancelled
-      // (like a reschedule) might pull in the absent parent, so our cancels can't be
-      // themselves omitted - they need to appear on the dest cal
-      calRemoveEvent(config.destId, destEvent.id, [410]);
-      return;
+      calRemoveEvent(config.destId, destEvent.id, toleratedErrors);
+      return true;
     } else {
       calReplaceEvent(config.destId, destEvent);
+      return false;
     }
+  };
+
+  try {
+    if (applyException([410])) { return; }
   } catch (e) {
     if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
 
@@ -151,12 +164,7 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
     }
 
     // Try again
-    if (destEvent.status === 'cancelled') {
-      calRemoveEvent(config.destId, destEvent.id);
-      return;
-    } else {
-      calReplaceEvent(config.destId, destEvent);
-    }
+    if (applyException()) { return; }
   }
 
   onSync?.(destEvent);
@@ -166,7 +174,7 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
 /**
  * Upsert or delete event, after applying any rules. 
  *
- * @param {string} sourceEvent - The event to process
+ * @param {Object} sourceEvent - The event to process
  * @param {Object} config - The src/dst calendar configuration spec
  * @param {Set} omittedParents - Internal bookkeeping set of known-absent parent events
  * @param {onSync} [onSync=null] - Optional callback to run on every sync'd dest event
@@ -206,7 +214,8 @@ function syncLoop(config, params, onSync = null) {
   const omittedParents = new Set(); // bookkeeping for syncExceptionEvent
 
   const effectiveParams = { ...params,
-                            ...{ eventTypes: 'default', singleEvents: false } };
+                            eventTypes: 'default',
+                            singleEvents: false };
 
   return calStreamEvents(config.sourceId, effectiveParams, sourceEvent =>
     syncEvent(sourceEvent, config, omittedParents, onSync)

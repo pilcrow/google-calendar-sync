@@ -146,7 +146,7 @@ function calReplaceEvent(calendarId, event) {
  * @param {string} calendarId - The calendar to search
  * @param {Object} params - Search parameters as for Calendar.Events.list
  * @param {eventCallback} [callback=null] - Optional function to call on each event
- * @return {string} - The syncToken to interrogate the calendar for changes
+ * @return {string|null} - The syncToken to interrogate the calendar for changes
  */
 function calStreamEvents(calendarId, params = {}, callback = null) {
   let response = null;
