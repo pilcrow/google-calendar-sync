@@ -9,8 +9,8 @@
  *   abc     XYZ                      'gcs' + hash('abc::XYZ')
  *   abc     XYZ_20260101T010203Z     'gcs' + hash('abc::XYZ') + '_20260101T010203Z'
  *
- * @param {string} sourceCalendarId - The source calendar identifier
- * @param {string} sourceEventId - The original source event ID
+ * @param {string} calendarId - The (source) calendar identifier
+ * @param {string} baseId - The original (source) base event ID
  * @param {string} [instanceSuffix=''] - Optional instance suffix, preserved
  * @return {string} A valid destination event ID (up to 1024 chars supported by Google)
  */
@@ -34,7 +34,7 @@ function _makeDestId(calendarId, baseId, instanceSuffix = '') {
  *
  * @param {Object} sourceEvent - A complete calendar event to translate to the dest cal
  * @param {Object} config - The src/dst sync instructions
- * @return {Object} A destination event, including ID
+ * @return {Object} The destination event
  */
 function buildDestReplica(sourceEvent, config) {
   const rulesResult = evaluateRules(sourceEvent.summary, config.rules);
@@ -51,7 +51,7 @@ function buildDestReplica(sourceEvent, config) {
 
   if (rulesResult.skip) {
     destEvent.status = 'cancelled';
-  } else if (sourceEvent['status'] != null) {
+  } else if (sourceEvent.status != null) {
     destEvent.status = sourceEvent.status;
   }
 
@@ -60,18 +60,17 @@ function buildDestReplica(sourceEvent, config) {
       destEvent[attr] = sourceEvent[attr];
     }
   }
-  //for (const attr of ['start', 'end', 'originalStartTime']) {
+
   for (const attr of ['start', 'end']) {
     if (sourceEvent[attr] != null) {
       destEvent[attr] = { ...sourceEvent[attr] };
     }
   }
+
   if (sourceEvent.recurrence) {
     destEvent.recurrence = [ ...sourceEvent.recurrence ];
   } 
-//  else if (sourceEvent.recurringEventId) {
-//    destEvent.recurringEventId = _makeDestId(config.sourceId, sourceEvent.recurringEventId);
-//  }
+
   if (rulesResult.colorId != null) {
     destEvent.colorId = rulesResult.colorId;
   }
@@ -122,13 +121,16 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
 
   const destEvent = buildDestReplica(sourceEvent, config);
 
-  if (destEvent.status === 'cancelled') {
-    calRemoveEvent(config.destId, destEvent.id);
-    return;
-  }
-
   try {
-    calReplaceEvent(config.destId, destEvent);
+    if (destEvent.status === 'cancelled') {
+      // Raise 404s, since a later orphaned sibling exception that is *not* cancelled
+      // (like a reschedule) might pull in the absent parent, so our cancels can't be
+      // themselves omitted - they need to appear on the dest cal
+      calRemoveEvent(config.destId, destEvent.id, [410]);
+      return;
+    } else {
+      calReplaceEvent(config.destId, destEvent);
+    }
   } catch (e) {
     if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
 
@@ -137,19 +139,24 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
     // window, but the main series otherwise does not.
     const sourceParent = calGetEvent(config.sourceId, sourceEvent.recurringEventId);
     if (! sourceParent) {
-      // Parent is missing. Unusual (delete race by another actor?) but not
-      // fatal
+      // Parent is completely missing from source. Unusual (true expiry/trash on
+      // source cal?), but same as cancelled parent from our perspective.
       omittedParents.add(sourceEvent.recurringEventId);
       return;
     } else if (! syncEvent(sourceParent, config, omittedParents)) {
-      // Parent is cancelled or skipped.  The calRemoveEvent will
-      // cascade to any child exception instances already on dest cal.
+      // Parent is cancelled or skipped, and calRemoveEvent already called
+      // on dest parent replica, which will cascade to children.
       // syncEvent() records the parent in omittedParents itself.
       return;
     }
 
     // Try again
-    calReplaceEvent(config.destId, destEvent);
+    if (destEvent.status === 'cancelled') {
+      calRemoveEvent(config.destId, destEvent.id);
+      return;
+    } else {
+      calReplaceEvent(config.destId, destEvent);
+    }
   }
 
   onSync?.(destEvent);
@@ -165,9 +172,7 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
  * @param {onSync} [onSync=null] - Optional callback to run on every sync'd dest event
  * @return The new destEvent id, if applicable
  */
-function syncEvent(sourceEvent, config, omittedParents, onSync) {
-  let r = null;
-
+function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
   if (sourceEvent.extendedProperties?.private?.sourceCalendarId) {
     console.warn('Loop guard: skipping replica found in source calendar: ' + sourceEvent.summary);
     return;
@@ -177,26 +182,16 @@ function syncEvent(sourceEvent, config, omittedParents, onSync) {
     return syncExceptionEvent(sourceEvent, config, omittedParents, onSync);
   }
 
-  if (sourceEvent.status === 'cancelled') {
-    const destEventId = _makeDestId(config.sourceId, sourceEvent.id);
-    calRemoveEvent(config.destId, destEventId);
-  } else {
-    const candidateDestEvent = buildDestReplica(sourceEvent, config);
-    if (candidateDestEvent.status === 'cancelled') {
-      // skipped by rule
-      calRemoveEvent(config.destId, candidateDestEvent.id);
-    } else {
-      calUpsertEvent(config.destId, candidateDestEvent);
-      onSync?.(candidateDestEvent);
-      r = candidateDestEvent.id;
-    }
+  const destEvent = buildDestReplica(sourceEvent, config);
+  if (destEvent.status === 'cancelled') {
+    calRemoveEvent(config.destId, destEvent.id);
+    if (sourceEvent.recurrence) { omittedParents.add(sourceEvent.id); }
+    return;
   }
 
-  if (!r && sourceEvent.recurrence) {
-    omittedParents.add(sourceEvent.id);
-  }
-
-  return r;
+  calUpsertEvent(config.destId, destEvent);
+  onSync?.(destEvent);
+  return destEvent.id;
 }
 
 /**
@@ -210,10 +205,10 @@ function syncEvent(sourceEvent, config, omittedParents, onSync) {
 function syncLoop(config, params, onSync = null) {
   const omittedParents = new Set(); // bookkeeping for syncExceptionEvent
 
-  params = { ...params, 
-             ...{ eventTypes: 'default', singleEvents: false } };
+  const effectiveParams = { ...params,
+                            ...{ eventTypes: 'default', singleEvents: false } };
 
-  return calStreamEvents(config.sourceId, params, sourceEvent =>
+  return calStreamEvents(config.sourceId, effectiveParams, sourceEvent =>
     syncEvent(sourceEvent, config, omittedParents, onSync)
   );
 }

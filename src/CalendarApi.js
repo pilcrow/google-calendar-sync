@@ -10,6 +10,20 @@
 const DEFAULT_CAL_OPS_ENTRY = { added: 0, removed: 0, updated: 0 };
 const CAL_OPS = {};
 
+const calGetIdByName = (function() {
+  let Names2Ids = null;
+
+  return function(calName) {
+    if (! Names2Ids) {
+      Names2Ids = new Map();
+      for (const cal of Calendar.CalendarList.list({showHidden: true}).items) {
+        
+      }
+    }
+    return Names2Ids.get(calName);
+  }
+})();
+
 /**
  * Sleep if needed to ensure a 500ms pause since the last write operation we
  * performed on the given calendar.  Intended to be called immediately before a
@@ -54,26 +68,29 @@ function calGetEvent(calendarId, eventId) {
 }
 
 /**
- * Remove the given eventId from the specified calendar, ignoring already absent events.
+ * Remove the given eventId from the specified calendar.  By default, 404s and
+ * 410s are tolerated.  Others will raise an exception.
  *
  * @param {string} calendarId - The calendar possibly containing the event
  * @param {string} eventId - The event to be removed
+ * @param {number[]} [toleratedErrors=[404,410]] - HTTP errors to tolerate
  * @return {boolean} True if the event existed and was removed.
  */
-function calRemoveEvent(calendarId, eventId) {
+function calRemoveEvent(calendarId, eventId, toleratedErrors = [404, 410]) {
   CAL_OPS[calendarId] ||= { ...DEFAULT_CAL_OPS_ENTRY };
+
+  let removed = false;
 
   try {
     _paceCalendarWrite(calendarId);
     Calendar.Events.remove(calendarId, eventId);
     CAL_OPS[calendarId].removed++;
-    return true;
+    removed = true;
   } catch (e) {
-    if (isHttpError(e, 404, 'Not Found') || isHttpError(e, 410, 'Resource has been deleted')) {
-      return false;
-    }
-    throw e;
+    if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
   }
+
+  return removed;
 }
 
 /**
@@ -118,7 +135,7 @@ function calReplaceEvent(calendarId, event) {
  * A callback accepting a calendar event object.
  *
  * @callback eventCallback
- * @param {Object} event
+ * @param {Object} event - The calendar event passed as an argument
  */
 
 /**
@@ -127,12 +144,11 @@ function calReplaceEvent(calendarId, event) {
  * handles paging automatically.
  *
  * @param {string} calendarId - The calendar to search
- * @param {Object} params - Search parameters as for Calendar.Events.List
- * @param callback - The function to call
+ * @param {Object} params - Search parameters as for Calendar.Events.list
+ * @param {eventCallback} [callback=null] - Optional function to call on each event
  * @return {string} - The syncToken to interrogate the calendar for changes
  */
 function calStreamEvents(calendarId, params = {}, callback = null) {
-  let nextSyncToken = null; // return value
   let response = null;
 
   const searchParams = { ...params };
@@ -142,14 +158,13 @@ function calStreamEvents(calendarId, params = {}, callback = null) {
     try {
       response = Calendar.Events.list(calendarId, searchParams);
     } catch (e) {
-      if (isHttpError(e, 404, 'Not Found')) {
-        console.warn('Calendar not found');
-        return null;
-      }
-      throw e;
+      if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
+      // else bad calendarId
+      console.warn(`Calendar not found: ${calendarId}`);
+      return null;
     }
 
-    if (response.items) {
+    if (callback && response.items) {
       response.items.forEach(event => callback(event));
     }
 
