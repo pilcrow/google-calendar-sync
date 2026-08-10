@@ -199,7 +199,18 @@ function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
     return;
   }
 
-  calUpsertEvent(config.destId, destEvent);
+  // upsert
+  if (config.syncTime && (Date.parse(sourceEvent.created) <= config.syncTime)) {
+    // we likely synced this event previously.  optimistic replace
+    if (!calReplaceEvent(config.destId, destEvent, [404])) {
+      calInsertEvent(config.destId, destEvent, []);
+    }
+  } else {
+    // optimistic insert
+    if (! calInsertEvent(config.destId, destEvent, [409])) {
+      calReplaceEvent(config.destId, destEvent, []);
+    }
+  }
   onSync?.(destEvent);
   return destEvent.id;
 }

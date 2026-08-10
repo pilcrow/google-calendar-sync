@@ -115,31 +115,6 @@ function calInsertEvent(calendarId, event, toleratedErrors = [409]) {
 }
 
 /**
- * Put the given event on the calendar, overwriting any previous version.
- *
- * @param {string} calendarId - The calendar possibly containing the event
- * @param {Object} event - The event to be upserted
- * @param {string} [tryFirst='replace'] - The optimistic strategy, attempting
- *   either a 'replace' before inserting, or an 'insert' before replacing.
- */
-function calUpsertEvent(calendarId, event, tryFirst = 'replace') {
-  switch (tryFirst) {
-  case 'replace':
-    if (! calReplaceEvent(calendarId, event, [404])) {
-      return calInsertEvent(calendarId, event, []);
-    }
-    break;
-  case 'insert':
-    if (! calInsertEvent(calendarId, event, [409])) {
-      return calReplaceEvent(calendarId, event, []);
-    }
-    break;
-  default:
-    throw new Error('calUpsertEvent: unrecognized tryFirst');
-  }
-}
-
-/**
  * Replace a given event on the calendar, overwriting any previous version.
  * Useful for creating exception instances.
  *
