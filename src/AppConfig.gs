@@ -2,43 +2,74 @@
 //
 // Management of app config and state
 
-let SCRIPT_PROPERTIES;
-
-function propsLoad() {
   // UserProperties :=
   //   { syncToken: '{"srcA::dstA":"token1", "srcB::dstA":"token2", ...}, ... }'
   //   { configHash: '{"srcA::dstA":"hash1", "srcB::dstA":"hash2", ...}, ... }'
+  //   { syncTime: '{"srcA::dstA":1712345678901, ...}, ... }'
   //
+class ScriptProperties {
+  // Not in Google Apps Script; see after class
+  // static GasUserProperties = null;
+  // static ConfigPairStateKey = ['syncToken', ...];
 
-  SCRIPT_PROPERTIES = PropertiesService.getUserProperties();
-  const props = SCRIPT_PROPERTIES.getProperties();
+  function constructor(props) {
+    this = {...props};
+  }
 
-  for (const a of ['syncToken', 'configHash']) {
-    if (props[a]) {
-      props[a] = JSON.parse(props[a]);
-    } else {
-      props[a] = {};
+  function allKeys() {
+    return new Set(ScriptProperties.ConfigPairStateKeys.flatMap( attr => Object.keys(props[attr] ?? {}) ));
+  }
+
+  function clear(key) {
+    ScriptProperties.ConfigPairStateKeys.forEach(k =>
+      delete this[attr]?.[key];
+    )
+  }
+
+  function update(key, kvObj) {
+    for (const attr of ScriptProperties.ConfigPairStateKeys) {
+      if (attr in kvObj) {
+        this[attr] ||= {};
+        if (kvObj[attr] != null) {
+          this[attr][key] = kbObj[attr];
+        } else {
+          delete this[attr][key];
+        }
+      }
     }
   }
 
-  return props;
+  static load() {
+    if (!ScriptProperties.GasUserProperties) {
+      ScriptProperties.GasUserProperties = PropertiesService.getUserProperties();
+    }
+    const props = ScriptProperties.GasUserProperties.getProperties();
+    for (const a of ScriptProperties.ConfigPairStateKeys) {
+      props[a] ||= '{}';
+      props[a] = JSON.parse(props[a]); // XXX try {} catch {}
+    }
+
+    return new ScriptProperties(props);
+  }
+
+  static store(props) {
+    for (const a of ScriptProperties.ConfigPairStateKeys) {
+      props[a] = JSON.stringify(props[a] || {});
+    }
+    ScriptProperties.GasUserProperties.setProperties(props);
+  }
+
 }
 
-function propsStore(props) {
-  const store = {};
-  for (const a of ['syncToken', 'configHash']) {
-    store[a] = JSON.stringify(props[a] || {});
-  }
-  SCRIPT_PROPERTIES.setProperties(store);
-}
+ScriptProperties.GasUserProperties = null;
+ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
 
 function qualifyConfig(props) {
   const [ qualified, removed ] = [ [], [] ];
-  const calMap = new Map();
-  const tempStore = new Map();
+  const calMap = new Map(); // id -> name and name -> id
 
   const referencedCals = new Set(CALENDAR_CONFIG.flatMap((cc) => [cc.source, cc.destination]).filter((x) => x != null));
-  const propsPairs = new Set(['syncToken', 'configHash'].flatMap( attr => Object.keys(props[attr]) ));
+  const propsPairs = props.allKeys();
   const allPropsIds = new Set(propsPairs.flatMap( p => p.split('::') ));
 
   calStreamCalendars( cal => {
@@ -53,6 +84,7 @@ function qualifyConfig(props) {
     }
   });
 
+  const tempStore = new Map();
   for (const cc of CALENDAR_CONFIG) {
     let ac;
     try {
@@ -106,6 +138,7 @@ class RuntimeConfig {
 
 class InactiveConfig extends RuntimeConfig {
   constructor(sourceId, destId, calId2Name) {
+    super();
     this.sourceId = sourceId;
     this.source = calId2Name.get(this.sourceId);
     this.destId = destId;
@@ -115,26 +148,30 @@ class InactiveConfig extends RuntimeConfig {
 
 class ActiveConfig extends RuntimeConfig {
   constructor(config, name2IdMap, props) {
+    super();
+
     ['source', 'destination'].forEach( attr => {
       this[attr] = config[attr];
     });
 
     this.sourceId = name2IdMap.get(this.source);
-    if (!this.sourceId) { throw new Error(`Invalid source calendar ${this.summarize()}`);
+    if (!this.sourceId) { throw new Error(`Invalid source calendar ${this.summarize()}`); }
     this.destId = name2IdMap.get(this.destination);
-    if (!this.destId) { throw new Error(`Invalid destination calendar ${this.summarize()}`);
+    if (!this.destId) { throw new Error(`Invalid destination calendar ${this.summarize()}`); }
 
-    this.configHash = props[ this.key() ]?.configHash
-    this.syncToken  = props[ this.key() ]?.syncToken
+    this.configHash = props.configHash[ this.key() ];
+    this.syncToken  = props.syncToken[ this.key() ];
+    this.syncTime   = props.syncTime[ this.key() ];
     this.rules = (config.rules || []);
 
     if (this.configHash && this.configHash !== this.hash()) {
       console.info(`Changed config for ${this.summarize()}`);
+      // Keep syncTime: it records the last known-good snapshot time, which the
+      // baseline upsert heuristic still uses for events created after it.
       this.syncToken = null;
     } else if (! this.configHash) {
       console.info(`New config for ${this.summarize()}`);
     }
-
   }
 
   hash() {

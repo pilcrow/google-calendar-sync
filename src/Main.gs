@@ -1,6 +1,8 @@
 // vim: set ft=javascript ts=2 sw=2 et:
 // Main orchestration entry point for calendar synchronization
 
+SCRIPT_DEFAULT_LOOKBACK_DAYS = 7;
+
 /**
  * Entry point for Google Apps Script execution
  */
@@ -39,8 +41,7 @@ function main() {
 function mainLoop(props, active, removed) {
   for (const r of removed) {
     if (removeSync(r)) {
-      delete props.syncToken[ r.key() ];
-      delete props.configHash[ r.key() ];
+      props.clear(r.key());
     }
   }
 
@@ -52,13 +53,14 @@ function mainLoop(props, active, removed) {
       console.info(`Begin incremental sync ${c.summarize()}`);
       nextSyncToken = incrementalSync(c, c.syncToken);
       if (nextSyncToken) {
-        props.syncToken[ c.key() ] = nextSyncToken;
-        props.configHash[ c.key() ] = c.hash();
+        props.update(c.key(), { syncToken: nextSyncToken,
+                          configHash: c.hash(),
+                          syncTime: Date.now() });
         console.info('Finished');
         continue;
       }
 
-      console.info(`Incremental unsuccessful, attempting new baseline sync`);
+      console.info(`Incremental unsuccessful, falling back to baseline sync`);
       why = 'incremental failed';
     } else if (c.configHash) {
       why = 'changed config';
@@ -66,12 +68,16 @@ function mainLoop(props, active, removed) {
       why = 'new config';
     }
 
-    console.info(`Begin baseline sync (${why}) ${c.summarize()}`);
-    nextSyncToken = intitialSync(...);
+    const lookbackDays = LOOKBACK_DAYS ?? SCRIPT_DEFAULT_LOOKBACK_DAYS;
+    const startWhen = new Date();
+    startWhen.setDate(- lookbackDays);
+    console.info(`Begin baseline sync (${why}) ${c.summarize()}, looking back ${lookbackDays} to ${startWhen.toISOString()}`);
+    nextSyncToken = intitialSync(config, startWhen.toISOString());
     if (nextSyncToken) {
-      props.syncToken[ c.key() ] = nextSyncToken;
-      props.configHash[ c.key() ] = c.hash();
+      props.update(c.key(), { syncToken: nextSyncToken,
+                        configHash: c.hash(),
+                        syncTime: Date.now() });
     }
-    console.log('Finished');
+    console.info('Finished');
   }
 }
