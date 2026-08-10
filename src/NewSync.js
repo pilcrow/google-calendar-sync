@@ -111,7 +111,7 @@ function buildDestReplica(sourceEvent, config) {
  * @param {onSync} [onSync=null] - Optional callback to run on every sync'd dest event
  * @return {string|undefined} The new destEvent's id, if applicable
  */
-function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
+function _syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
   // 1) If we know the parent is absent from the dest calendar,
   //    then there are no exceptions to update.  Nothing to do.
   //
@@ -181,6 +181,7 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
  * @param {Set} omittedParents - Internal bookkeeping set of known-absent parent events
  * @param {onSync} [onSync=null] - Optional callback to run on every sync'd dest event
  * @return The new destEvent id, if applicable
+ * @throws {SoftTimeoutError} 
  */
 function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
   if (sourceEvent.extendedProperties?.private?.sourceCalendarId) {
@@ -188,8 +189,10 @@ function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
     return;
   }
 
+  scriptTimeCheck();
+
   if (sourceEvent.recurringEventId) {
-    return syncExceptionEvent(sourceEvent, config, omittedParents, onSync);
+    return _syncExceptionEvent(sourceEvent, config, omittedParents, onSync);
   }
 
   const destEvent = buildDestReplica(sourceEvent, config);
@@ -203,11 +206,13 @@ function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
   if (config.syncTime && (Date.parse(sourceEvent.created) <= config.syncTime)) {
     // we likely synced this event previously.  optimistic replace
     if (!calReplaceEvent(config.destId, destEvent, [404])) {
+      scriptTimeCheck();
       calInsertEvent(config.destId, destEvent, []);
     }
   } else {
     // optimistic insert
     if (! calInsertEvent(config.destId, destEvent, [409])) {
+      scriptTimeCheck();
       calReplaceEvent(config.destId, destEvent, []);
     }
   }
@@ -224,12 +229,13 @@ function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
  * @return {string} The next syncToken for the given source calendar
  */
 function syncLoop(config, params, onSync = null) {
-  const omittedParents = new Set(); // bookkeeping for syncExceptionEvent
+  const omittedParents = new Set(); // bookkeeping for _syncExceptionEvent
 
   const effectiveParams = { ...params,
                             eventTypes: 'default',
                             singleEvents: false };
 
+  scriptTimeCheck();
   return calStreamEvents(config.sourceId, effectiveParams, sourceEvent =>
     syncEvent(sourceEvent, config, omittedParents, onSync)
   );
@@ -255,8 +261,10 @@ function initialSync(config, startFrom) {
   if (synced.size) {
     const filter = { privateExtendedProperty: 'sourceCalendarId=' + config.sourceId };
 
+    scriptTimeCheck();
     calStreamEvents(config.destId, filter, event => {
       if (! synced.has(event.id)) {
+        scriptTimeCheck();
         calRemoveEvent(config.destId, event.id);
       }
     });
