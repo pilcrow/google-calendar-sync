@@ -77,6 +77,7 @@ function buildDestReplica(sourceEvent, config) {
 
   if (sourceEvent.recurringEventId) {
     const instanceSuffix = sourceEvent.id.slice(sourceEvent.recurringEventId.length + 1);
+    //if (! instanceSuffix) { throw new Error('Corrupted source event?'); }
     destEvent.id = _makeDestId(config.sourceId, sourceEvent.recurringEventId, instanceSuffix);
   } else {
     destEvent.id = _makeDestId(config.sourceId, sourceEvent.id);
@@ -148,8 +149,9 @@ function syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
     if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
 
     // Parent is missing.  Can happen on a time-windowed Events.list
-    // on a first-time sync, where an exception event occurs in our
-    // window, but the main series otherwise does not.
+    // on a first-time sync, where an exception event appears in our
+    // window, but the main series otherwise does not.  Or a race if
+    // someone deleted the parent outside this script.
     const sourceParent = calGetEvent(config.sourceId, sourceEvent.recurringEventId);
     if (! sourceParent) {
       // Parent is completely missing from source. Unusual (true expiry/trash on
@@ -227,7 +229,7 @@ function syncLoop(config, params, onSync = null) {
  * dest calendar, applying any transformation or skip rules along the way.
  *
  * @param {Object} config - The src/dst calendar configuration spec
- * @param {boolean} deleteOrphans - Whether to delete orphaned pre-existing dst events
+ * @param {string} startFrom - ISO timestamp string to start from
  * @return {string} The source calendar syncToken for a subsequent incremental sync
  */
 function initialSync(config, startFrom) {
@@ -243,11 +245,10 @@ function initialSync(config, startFrom) {
     const filter = { privateExtendedProperty: 'sourceCalendarId=' + config.sourceId };
 
     calStreamEvents(config.destId, filter, event => {
-        if (! synced.has(event.id)) {
-          calRemoveEvent(config.destId, event.id);
-        }
+      if (! synced.has(event.id)) {
+        calRemoveEvent(config.destId, event.id);
       }
-    );
+    });
   }
 
   return syncToken;
@@ -256,15 +257,28 @@ function initialSync(config, startFrom) {
 /**
  * Perform an incremental sync from the given config spec's source calendar to the
  * dest calendar, applying any transformation or skip rules along the way.
+ * If the syncToken is expired, returns null.
  *
  * @param {Object} config - The src/dst calendar configuration spec
- * @param {boolean} syncToken - The src calendar starting point token
+ * @param {string} syncToken - The src calendar starting point token
  * @return {string} The source calendar syncToken for a subsequent incremental sync
+ *                  or null if the token was expired.
  */
 function incrementalSync(config, syncToken) {
   const params = {   syncToken: syncToken,
                    showDeleted: true       };
 
-  return syncLoop(config, params);
+  try {
+    return syncLoop(config, params);
+  } catch (e) {
+    if (isGoogleJsonResponseErr(e, 410)) {
+      for (const err of (e.details?.errors || [])) {
+        if (err.reason === 'fullSyncRequired') {
+          return null;
+        }
+      }
+    }
+    throw e;
+  }
+  // not reached
 }
-
