@@ -15,7 +15,8 @@ The plan validates:
 Out of scope for now:
 
 1. Full end-to-end automation framework.
-2. Unsupported multi-destination fan-out for a single source calendar.
+
+Note: multi-destination fan-out (configuring the same source to sync to multiple destinations) is supported; the engine tracks state per source→destination pair. Include fan-out scenarios in the test matrix where relevant.
 
 ## 2. Test environment
 

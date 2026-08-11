@@ -8,7 +8,7 @@ Authoritative technical reference for the Google Apps Script calendar sync engin
 
 ### Hub-and-Spoke
 
-Multiple source calendars sync one-way into one or more destination calendars. Each source→destination pair is configured independently in `CALENDAR_CONFIG`, and each source calendar must be unique across entries. Pairs are processed sequentially within each trigger execution.
+Multiple source calendars sync one-way into one or more destination calendars. Each source→destination pair is configured independently in `CALENDAR_CONFIG`. Pairs are processed sequentially within each trigger execution.
 
 ### File Structure
 
@@ -76,7 +76,7 @@ const CALENDAR_CONFIG = [
 `orchestrateCalendarSync()` (Main.gs):
 
 1. Acquires a script lock (`LockService.getScriptLock().tryLock(LOCK_TIMEOUT_MS)`). If the lock cannot be acquired, logs a warning and exits.
-2. Resolves all calendar references once via `resolveCalendarConfig()` and validates unique source mappings.
+2. Resolves all calendar references once via `resolveCalendarConfig()`.
 3. Computes removed mappings by diffing the current resolved set against the previously managed pair/source registry. If any configured mapping fails resolution, removal cleanup and registry updates are skipped for safety in that run.
 4. Cleans removed mappings by deleting destination events tagged with the removed source in the removed destination.
 5. Iterates over active resolved pairs, calling `syncCalendarPair()` for each. Stops if the 5-minute timeout threshold is reached.
@@ -307,8 +307,8 @@ A parallel check in `executeReconciliationSync()` emits the same warning with an
 
 ### Multi-destination fan-out
 
-Sync tokens are keyed by source calendar only (`SYNC_TOKEN_[encodedSourceCalendarId]`). The implementation enforces one-to-one source mapping: `validateUniqueSourceCalendarMappings()` rejects any configuration where the same source appears in more than one `CALENDAR_CONFIG` entry.
+Sync tokens and config hashes are tracked per source→destination pair (e.g. keys like `SYNC_TOKEN_<encodedSrc>_<encodedDest>`). Fan-out — configuring the same source to sync to multiple destinations — is supported; state is preserved per pair. Operators should be aware that each pair maintains its own token and hash and should configure mappings intentionally.
 
-### Tokenless skip-filter cleanup scope
+### Full-sync orphan cleanup
 
-If recurring items were previously synced and later become skip-filtered, they are removed when processed. The key limitation is tokenless source-window behavior: `syncSourceWindow()` processes only the `[now − LOOKBACK_DAYS, ∞)` window and does not run orphan cleanup, so previously synced destination items not represented in that source window may remain until reconciliation.
+`initialSync()` runs an orphan cleanup pass after every full sync: it lists all destination events tagged with the source calendar ID (via the `privateExtendedProperty` filter) and removes any whose ID was not re-synced in the just-scanned `[now − LOOKBACK_DAYS, ∞)` window. Because destination IDs are deterministic (§8), re-synced replicas are addressed in place and always survive the pass; everything else — events deleted from the source, items that now match `skip`, and replicas older than the lookback window — is removed unconditionally. The pass runs even when nothing was re-synced in the window (e.g. a skip-all rule), so a full sync also acts as a complete wipe of a pair's tagged replicas.
