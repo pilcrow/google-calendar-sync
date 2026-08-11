@@ -91,5 +91,5 @@ In the Apps Script IDE: **Triggers → Add Trigger**:
 
 ## Limitations
 
-- **One-to-one source mapping only:** The same source calendar must not appear in more than one `CALENDAR_CONFIG` entry. Sync tokens are keyed by source only, so fan-out is unsupported. The script validates this at startup and exits the run with an error if duplicates are configured.
-- **Skip-filtered items outside the lookback window may linger temporarily:** Events that match `skip` are removed when the script processes them. In runs that scan only the lookback window (default: last 7 days plus future), previously copied older events may remain until a later consistency-cleanup pass removes them.
+- **Multi-destination support:** A source calendar may be configured to sync to multiple destinations. State is tracked per source→destination pair, and the engine preserves per-pair sync tokens and config hashes. Operators should be aware that a misconfigured mapping may require manual inspection.
+- **Full syncs clean up stale replicas:** A full sync scans the lookback window (default: last 7 days plus future) and then removes any previously-copied destination events tagged for that source that were not re-synced in that window — including copies older than the window and items that now match `skip`.
