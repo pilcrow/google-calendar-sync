@@ -9,3 +9,8 @@ const SCRIPT_TIMEOUT_MS = 315000;
 
 // How long to wait for concurency lock
 const SCRIPT_LOCK_TIMEOUT_MS = 30000;
+
+// How long (in days) to hold stored sync state for a pair that no longer
+// resolves to an active config, giving time to fix a renamed or re-added
+// calendar before the pair's state is dismissed.
+const STATE_RECLAIM_DAYS = 30;

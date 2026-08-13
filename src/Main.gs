@@ -39,10 +39,11 @@ function main() {
 }
 
 function mainLoop(props, active, removed) {
+  // Dismissal is state-only: synced replicas are left untouched and are
+  // reconciled on a future full sync.
   for (const r of removed) {
-    if (removeSync(r)) {
-      props.clear(r.key());
-    }
+    console.warn(`Removing sync state ${r.summarize()} (${r.key()})`);
+    props.clear(r.key());
   }
 
   for (const c of active) {
@@ -70,9 +71,9 @@ function mainLoop(props, active, removed) {
 
     const lookbackDays = LOOKBACK_DAYS ?? SCRIPT_DEFAULT_LOOKBACK_DAYS;
     const startWhen = new Date();
-    startWhen.setDate(- lookbackDays);
+    startWhen.setDate(startWhen.getDate() - lookbackDays);
     console.info(`Begin baseline sync (${why}) ${c.summarize()}, looking back ${lookbackDays} to ${startWhen.toISOString()}`);
-    nextSyncToken = intitialSync(config, startWhen.toISOString());
+    nextSyncToken = initialSync(c, startWhen.toISOString());
     if (nextSyncToken) {
       props.update(c.key(), { syncToken: nextSyncToken,
                         configHash: c.hash(),

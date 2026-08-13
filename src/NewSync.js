@@ -258,17 +258,15 @@ function initialSync(config, startFrom) {
                              (destEvent) => synced.add(destEvent.id)
   );
 
-  if (synced.size) {
-    const filter = { privateExtendedProperty: 'sourceCalendarId=' + config.sourceId };
+  const filter = { privateExtendedProperty: 'sourceCalendarId=' + config.sourceId };
 
-    scriptTimeCheck();
-    calStreamEvents(config.destId, filter, event => {
-      if (! synced.has(event.id)) {
-        scriptTimeCheck();
-        calRemoveEvent(config.destId, event.id);
-      }
-    });
-  }
+  scriptTimeCheck();
+  calStreamEvents(config.destId, filter, event => {
+    if (! synced.has(event.id)) {
+      scriptTimeCheck();
+      calRemoveEvent(config.destId, event.id);
+    }
+  });
 
   return syncToken;
 }
