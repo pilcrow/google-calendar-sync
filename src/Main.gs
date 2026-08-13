@@ -15,12 +15,12 @@ function main() {
   }
 
   // Load
-  const props = loadProperties();
+  const props = ScriptProperties.load();
   const [ active, removed ] = qualifyConfig(props);
   {
     const nSource = (new Set(active.map(a => a.sourceId))).size;
     const nDest = (new Set(active.map(a => a.destId))).size;
-    console.info(`${active.length} pairs to sync (${nSource} source, ${nDest} dest), ${removed.length} pairs to remove`);
+    console.info(`${active.length} pairs to sync (${nSource} source, ${nDest} dest), ${removed.length} pairs to dismiss`);
   }
 
   // Loop
@@ -32,7 +32,7 @@ function main() {
   }
 
   // Leave
-  storeProperties(props);
+  ScriptProperties.store(props);
   lock.releaseLock();  
   // FIXME - log CAL_OPS summary
 
@@ -42,7 +42,7 @@ function mainLoop(props, active, removed) {
   // Dismissal is state-only: synced replicas are left untouched and are
   // reconciled on a future full sync.
   for (const r of removed) {
-    console.warn(`Removing sync state ${r.summarize()} (${r.key()})`);
+    console.warn(`Dismissing sync state ${r.summarize()} (${r.key()})`);
     props.clear(r.key());
   }
 

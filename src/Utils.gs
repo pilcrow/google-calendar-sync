@@ -53,3 +53,21 @@ const scriptTimeCheck = (function() {
     }
   }
 })();
+
+/**
+ * Return true if the given exception is a Google API JSON response error
+ * whose HTTP status code is one of the given codes.
+ *
+ * Advanced Calendar Service failures throw an exception whose `details`
+ * carries `{ code, message, errors: [...] }`; `status` covers other
+ * HTTP-shaped errors.
+ *
+ * @param {*} e - The thrown exception object
+ * @param {...number} codes - HTTP status codes to match
+ * @return {boolean} True if the exception's status code is in `codes`
+ */
+function isGoogleJsonResponseErr(e, ...codes) {
+  if (!e || typeof e !== 'object') { return false; }
+  const code = e.details?.code ?? e.code ?? e.status;
+  return codes.includes(code);
+}

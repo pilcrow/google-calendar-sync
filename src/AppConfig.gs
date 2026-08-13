@@ -12,21 +12,21 @@ class ScriptProperties {
   // static GasUserProperties = null;
   // static ConfigPairStateKey = ['syncToken', ...];
 
-  function constructor(props) {
-    this = {...props};
+  constructor(props) {
+    Object.assign(this, props);
   }
 
-  function allKeys() {
-    return new Set(ScriptProperties.ConfigPairStateKeys.flatMap( attr => Object.keys(props[attr] ?? {}) ));
+  allKeys() {
+    return new Set(ScriptProperties.ConfigPairStateKeys.flatMap( attr => Object.keys(this[attr] ?? {}) ));
   }
 
-  function clear(key) {
-    ScriptProperties.ConfigPairStateKeys.forEach(k =>
-      delete this[k]?.[key];
-    )
+  clear(key) {
+    for (const k of ScriptProperties.ConfigPairStateKeys) {
+      if (this[k]) { delete this[k][key]; }
+    }
   }
 
-  function update(key, kvObj) {
+  update(key, kvObj) {
     for (const attr of ScriptProperties.ConfigPairStateKeys) {
       if (attr in kvObj) {
         this[attr] ||= {};
@@ -132,17 +132,15 @@ function qualifyConfig(props) {
         continue;
       }
 
-      // Construct an ActiveConfig using the resolved IDs
-      try {
-        const ac = new ActiveConfig(cc, props, { sourceId, destId });
-        // Defer to the dedup pass below so duplicate (srcId, dstId) pairs are
-        // detected before anything is qualified.
-        let entries = byKey.get(ac.key());
-        if (!entries) { byKey.set(ac.key(), entries = []); }
-        entries.push(ac);
-      } catch (e) {
-        console.warn(e.message);
-      }
+      // Construct an ActiveConfig using the resolved IDs. The constructor can
+      // no longer fail on expected inputs (absurd pairs are pre-checked above),
+      // so a throw here is a programming error and must propagate.
+      const ac = new ActiveConfig(cc, props, { sourceId, destId });
+      // Defer to the dedup pass below so duplicate (srcId, dstId) pairs are
+      // detected before anything is qualified.
+      let entries = byKey.get(ac.key());
+      if (!entries) { byKey.set(ac.key(), entries = []); }
+      entries.push(ac);
     } else {
       // Unresolvable (zero matches) or ambiguous (name matches 2+ calendars)
       const why = [];
