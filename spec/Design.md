@@ -8,25 +8,30 @@ Authoritative technical reference for the Google Apps Script calendar sync engin
 
 ### Hub-and-Spoke
 
-Multiple source calendars sync one-way into one or more destination calendars. Each source→destination pair is configured independently in `CALENDAR_CONFIG`. Pairs are processed sequentially within each trigger execution.
+Multiple source calendars sync one-way into one or more destination calendars. Each source→destination pair is configured independently in `CALENDAR_CONFIG`. Pairs are processed sequentially within each trigger execution (`mainLoop` in `src/Main.gs`).
 
 ### File Structure
 
-Apps Script loads `.gs` files in alphabetical order into a single shared global namespace:
+Apps Script loads project files into a single shared global namespace, so cross-file references are resolved by name. Both `.gs` and `.js` files are part of the deployed project.
 
-| File           | Role                                                                          |
-|----------------|-------------------------------------------------------------------------------|
-| `Config.gs`    | Human-editable configuration (loaded first; constants available globally)     |
-| `Main.gs`      | Orchestration entry point and incremental sync                                |
-| `RuleEngine.gs`| Rule evaluation                                                               |
-| `SyncEngine.gs`| Core event processing and reconciliation                                      |
-| `Utils.gs`     | ID generation, timing, properties access, calendar resolution                 |
+| File                | Role                                                                                       |
+|---------------------|--------------------------------------------------------------------------------------------|
+| `00Init.gs`         | Script globals: `SCRIPT_BASETIME`, `SCRIPT_TIMEOUT_MS`, `SCRIPT_LOCK_TIMEOUT_MS`, `STATE_RECLAIM_DAYS` |
+| `AppConfig.gs`      | `ScriptProperties` (UserProperties-backed per-pair state), `qualifyConfig()` (calendar resolution and stale-state dismissal), `RuntimeConfig`/`ActiveConfig`/`InactiveConfig` |
+| `CalendarApi.js`    | `cal*` wrappers over the Calendar v3 API: write pacing, pagination, `syncToken` extraction, API-call accounting (`CAL_OPS`) |
+| `Config.gs`         | Human-editable configuration (gitignored; contains personal calendar IDs)                    |
+| `Config.gs.example` | Committed template; must be kept in structural sync with `Config.gs`                         |
+| `Main.gs`           | Orchestration entry point: `main()`, `mainLoop()`; chooses incremental vs baseline sync      |
+| `NewSync.js`        | Sync engine: `_makeDestId()`, `buildDestReplica()`, `syncEvent()`, `_syncExceptionEvent()`, `syncLoop()`, `initialSync()`, `incrementalSync()` |
+| `RuleEngine.gs`     | `evaluateRules()`                                                                            |
+| `Utils.gs`          | `generateMd5Hash()`, `SoftTimeoutError`, `scriptTimeCheck()`                                 |
+| `appsscript.json`   | Apps Script manifest: V8 runtime, Calendar v3 advanced service, timezone                     |
 
-`Config.gs` is gitignored (contains personal calendar IDs). `Config.gs.example` is the committed template and must be kept in structural sync with `Config.gs`.
+**Note on `src/HandleConfig.gs`:** an unreconciled work-in-progress duplicate of `AppConfig.gs`. It redeclares `ScriptProperties`, the `RuntimeConfig` classes, and `qualifyConfig()`. Deploying it alongside `AppConfig.gs` fails to load (duplicate top-level `class` declarations are a V8 `SyntaxError`). It must be reconciled with `AppConfig.gs` or deleted before the project can run.
 
 ### Coding Conventions
 
-All repository-owned `.gs` files must include this vim modeline as line 1:
+All repository-owned `.gs`/`.js` files must include the vim modeline as line 1:
 
 ```javascript
 // vim: set ft=javascript ts=2 sw=2 et:
@@ -41,7 +46,9 @@ Avoid inline comments that restate what the code already clearly expresses.
 `Config.gs` declares:
 
 ```javascript
-const API_PAGE_SIZE = 250;      // Optional override (max 250)
+const API_PAGE_SIZE = 250;   // Optional override (max 250)
+
+const LOOKBACK_DAYS = 7;     // Optional override (baseline sync window)
 
 const CALENDAR_CONFIG = [
   {
@@ -55,17 +62,26 @@ const CALENDAR_CONFIG = [
 ];
 ```
 
-`API_PAGE_SIZE` is optional. If it is undefined, runtime falls back to `DEFAULT_API_PAGE_SIZE` (250). The value is used for all `Calendar.Events.list` and `Calendar.CalendarList.list` calls.
+- `API_PAGE_SIZE` is optional. If it is undefined, runtime falls back to `DEFAULT_API_PAGE_SIZE` (250). It is used for all `Calendar.Events.list` and `Calendar.CalendarList.list` calls.
+- `LOOKBACK_DAYS` is optional. If it is undefined, `mainLoop` falls back to `SCRIPT_DEFAULT_LOOKBACK_DAYS` (7). It controls how far back a baseline sync scans (see §4.3).
 
 ---
 
 ## 3. Calendar Reference Resolution
 
-`source` and `destination` may be either a calendar ID or a display name (the effective name shown in the Google Calendar UI: `summaryOverride` when set, otherwise `summary`). Resolution happens at runtime via `resolveCalendarConfig()`:
+`source` and `destination` may each be a calendar ID or a display name (the effective name shown in the Google Calendar UI: `summaryOverride` when set, otherwise `summary`). Resolution happens at runtime in `qualifyConfig()` (`src/AppConfig.gs`).
 
-1. If the reference exactly matches a known calendar ID, it is used as-is.
-2. If it matches exactly one display name, that calendar's ID is used.
-3. If it is ambiguous (multiple calendars share the name) or not found, the pair is **skipped with `console.warn`**; remaining pairs continue.
+For each side, the set of candidate IDs is the union of:
+
+1. an exact match against a known calendar ID, and
+2. all calendar IDs whose display name matches.
+
+A config entry becomes an active pair only when each side resolves to exactly one ID and the two IDs differ. Everything else is skipped with `console.warn` and processing continues with the remaining entries:
+
+- **Unresolvable** — a side matches zero calendars.
+- **Ambiguous** — a side matches more than one calendar.
+- **Absurd** — source and destination resolve to the same calendar ID.
+- **Duplicate** — two or more entries resolve to the same `(sourceId, destinationId)` pair; all of them are skipped.
 
 ---
 
@@ -73,72 +89,89 @@ const CALENDAR_CONFIG = [
 
 ### 4.1 Entry Point
 
-`orchestrateCalendarSync()` (Main.gs):
+`main()` (`src/Main.gs`):
 
-1. Acquires a script lock (`LockService.getScriptLock().tryLock(LOCK_TIMEOUT_MS)`). If the lock cannot be acquired, logs a warning and exits.
-2. Resolves all calendar references once via `resolveCalendarConfig()`.
-3. Computes removed mappings by diffing the current resolved set against the previously managed pair/source registry. If any configured mapping fails resolution, removal cleanup and registry updates are skipped for safety in that run.
-4. Cleans removed mappings by deleting destination events tagged with the removed source in the removed destination.
-5. Iterates over active resolved pairs, calling `syncCalendarPair()` for each. Stops if the 5-minute timeout threshold is reached.
-6. On successful completion, clears stale state (`SYNC_TOKEN_*`, `CONFIG_HASH_*`) for removed mappings and persists the new managed registry snapshot.
-7. Releases the lock in a `finally` block.
+1. Acquires a lock (`LockService.getUserLock().tryLock(SCRIPT_LOCK_TIMEOUT_MS)`, 30 s). If the lock cannot be acquired, logs at `console.error` and exits.
+2. Loads per-pair state via `ScriptProperties.load()`.
+3. Calls `qualifyConfig(props)` to split `CALENDAR_CONFIG` into active pairs and removed (stale-state) pairs (§3).
+4. `mainLoop()`:
+   - **Dismissal is state-only.** For each removed pair, the stored state keys are cleared. Synced destination replicas are left untouched; they are reconciled by a future baseline sync if the pair is ever re-added (deterministic IDs make that safe).
+   - For each active pair, chooses incremental vs baseline sync (§4.2/§4.3) and persists `syncToken`, `configHash`, and `syncTime` for the pair only after its sync completes successfully.
+5. `storeProperties()` persists the updated state; the lock is released.
 
-### 4.2 Incremental Sync (normal path)
+A `SoftTimeoutError` aborts the loop (see §11): the interrupted pair's state is not persisted, so the next run re-syncs it. Any other error propagates out of `mainLoop` (there is no per-pair recovery) and aborts the execution.
 
-`performIncrementalSync()` uses the stored `syncToken` to fetch only changed events since the last run. For each page of results, calls `processSyncItem()`. Persists the new `syncToken` only on successful completion (no timeout) and logs duration + event metrics (`# added, # updated, # deleted`).
+### 4.2 Incremental Sync
 
-If no `syncToken` is stored (first run for this source), delegates to `syncSourceWindow()` instead.
+`incrementalSync(config, syncToken)` (`src/NewSync.js`) streams the source calendar's changes since `syncToken` (`syncLoop` with `{ syncToken, showDeleted: true }`), calling `syncEvent()` per item. It returns the next `syncToken` on success and **null** when the token has expired (`HTTP 410` with reason `fullSyncRequired`); the caller then falls back to a baseline sync. The new token is persisted only after the pair's sync completes (see §4.1).
 
-### 4.3 Reconciliation Sync
+If no `syncToken` is stored for the pair (first run, new config, or changed config), `mainLoop` calls `initialSync()` directly.
 
-Triggered by:
-- `HTTP 410 Gone` — sync token expired
-- Rules change detected with a stored sync token — `checkCalendarPairConfigChange()` returns true and a sync token exists. If rules changed but no sync token is stored, the code falls through to `syncSourceWindow()`, which upserts current source events, removes in-window items that now match `skip`, and writes the new config hash, but **skips orphan cleanup**.
+### 4.3 Baseline Sync
 
-`executeReconciliationSync()`:
+Triggered when the pair has no usable `syncToken`:
 
-1. Builds an **AllowedSet** of destination event IDs for all source events in the `[now − LOOKBACK_DAYS, ∞)` window that pass current rules (not cancelled, not skip-filtered).
-2. Queries the destination calendar for all events tagged with the source calendar ID (via `privateExtendedProperty` filter).
-3. Removes any destination event whose ID is not in the AllowedSet (orphan cleanup — deleted events, newly skip-filtered events).
-4. Calls `syncSourceWindow()` with the same `timeMin` to upsert all surviving source events and capture a fresh `syncToken`.
+- **New config** — no `configHash` recorded yet.
+- **Changed config** — `ActiveConfig` detects `configHash !== hash()` and nulls the stored `syncToken` (it keeps `syncTime`, which the upsert heuristic uses).
+- **Expired token** — incremental sync returned null on `410 fullSyncRequired`.
 
-**Invariant:** Reconciliation never performs a destructive wipe of the destination calendar.
+`initialSync(config, startFrom)` (`src/NewSync.js`):
 
-### 4.4 Source Window Sync
+1. Streams `[startFrom, ∞)` on the source (`syncLoop` with `{ timeMin: startFrom, showDeleted: false }`), recording the destination ID of every synced replica.
+2. **Orphan cleanup:** streams all destination events tagged with the source calendar ID (via the `privateExtendedProperty` filter) and removes any whose ID is not in the recorded set — deleted source events, newly skip-filtered events, and replicas older than the lookback window.
+3. Returns a fresh `syncToken`.
 
-`syncSourceWindow()` (SyncEngine.gs) performs a tokenless `[now − LOOKBACK_DAYS, ∞)` scan:
+**Invariant:** baseline cleanup is pair-scoped and ID-based — it removes only replicas tagged with this pair's source calendar, never performing a blanket wipe of the destination calendar.
 
-- Per page, partitions events into masters and exceptions, then processes masters first, exceptions second (see §6).
-- Persists the fresh `syncToken` and updates the config hash only on successful completion (no timeout).
-- Logs duration + event metrics.
+### 4.4 `syncLoop()`
+
+`syncLoop(config, params, onSync)` (`src/NewSync.js`) is the shared streaming core. It forces `singleEvents: false` and `eventTypes: 'default'` (required for `syncToken` support), streams via `calStreamEvents()`, and invokes `syncEvent()` on each item. It returns the next `syncToken`, or `null` when the source calendar ID is unknown.
 
 ---
 
 ## 5. Event Processing
 
-### 5.1 `processSyncItem()`
+### 5.1 `syncEvent()`
 
-1. **Loop guard:** If `item.extendedProperties?.private?.sourceCalendarId` is set, the event is a sync replica — log a warning and return. (See §10.)
-2. **Exception routing:** If `item.recurringEventId` is set, delegate to `processExceptionSyncItem()`.
-3. **Cancellation:** If `item.status === 'cancelled'`, remove the destination event (ignore 404/410).
-4. **Rule evaluation:** Run `evaluateRules(item.summary, config.rules)`. If `skip`, remove the destination event (ignore 404/410).
-5. **Upsert:** Build destination payload via `buildDestinationEvent()`. Attempt `Calendar.Events.get()`; on success use `update()`, on 404 use `insert()`.
+`syncEvent(sourceEvent, config, omittedParents, onSync)` (`src/NewSync.js`) processes a single source item:
 
-### 5.2 `buildDestinationEvent()` — Outbound Field Allowlist
+1. **Loop guard:** If `sourceEvent.extendedProperties?.private?.sourceCalendarId` is set, the item is a sync replica — log a warning and return. (See §10.)
+2. **Time check:** `scriptTimeCheck()`.
+3. **Exception routing:** If `sourceEvent.recurringEventId` is set, delegate to `_syncExceptionEvent()`.
+4. **Cancellation/skip:** Build the destination replica via `buildDestReplica()`. If its `status` is `cancelled` (source event cancelled, or rule-skipped), remove the destination event by its deterministic ID (`calRemoveEvent`, tolerating 404/410). If the source item was a master (`recurrence` present), record it in `omittedParents` so sibling exceptions are skipped. Otherwise continue to the upsert.
+5. **Upsert** — optimistic, no read-before-write:
+   - If the pair has a recorded `syncTime` and the source event was created at or before it (`Date.parse(sourceEvent.created) <= syncTime`), the replica probably exists: attempt `calReplaceEvent()` first; a `404` falls back to `calInsertEvent()`.
+   - Otherwise (likely a new event): attempt `calInsertEvent()` first; a `409` collision falls back to `calReplaceEvent()`.
+6. Invoke `onSync?.(destEvent)` and return the destination event ID.
 
-Only the following fields are written to destination events. Arbitrary source fields must not be added; many Calendar API fields are read-only or server-set.
+### 5.2 `buildDestReplica()` — Outbound Field Allowlist
 
-| Field                          | Notes                                         |
-|--------------------------------|-----------------------------------------------|
-| `summary`                      | Rule prefix prepended                         |
-| `description`, `location`      | Copied as-is                                  |
-| `start`, `end`                 | `date`/`dateTime`/`timeZone` are the only keys (all writable), so copying the object as-is is equivalent to a sub-field allowlist. Omit the field when the source value is empty or absent; never send `{}`. |
-| `transparency`, `visibility`   | Copied as-is                                  |
-| `colorId`                      | From rule result; omitted if rule returns null|
-| `recurrence`                   | Master events only (shallow copy of array)    |
-| `extendedProperties.private`   | `sourceCalendarId`, `sourceEventId`           |
+`buildDestReplica(sourceEvent, config)` constructs the destination payload. Only the following fields are written. Arbitrary source fields must not be added; many Calendar API fields are read-only or server-set.
 
-`recurringEventId` and `originalStartTime` are intentionally excluded: destination instances are addressed by their computed ID (§6.2), so neither field belongs in a payload. The event-level fields the allowlist genuinely guards against are the read-only/server-set ones — `id`, `etag`, `created`, `updated`, `creator`, `organizer`, `htmlLink`, `hangoutLink`, `iCalUID` — plus `attendees`, which is deliberately not copied. (The API schema marks `recurringEventId`/`originalStartTime` Immutable, with conflicting `events.insert` annotations; see `spec/google-api-notes.md`.)
+| Field                        | Notes                                                                                         |
+|------------------------------|-----------------------------------------------------------------------------------------------|
+| `summary`                    | Rule prefix prepended                                                                         |
+| `description`, `location`, `transparency`, `visibility` | Copied when non-null                                                           |
+| `start`, `end`               | Shallow-copied when present. `date`/`dateTime`/`timeZone` are the only writable sub-keys, so copying the object is equivalent to a sub-field allowlist; the field is omitted when the source value is absent, never sent as `{}` |
+| `colorId`                    | From rule result; omitted when the rule returns null                                           |
+| `recurrence`                 | Master events only (shallow copy of array)                                                     |
+| `extendedProperties.private` | `sourceCalendarId`, `sourceEventId`                                                            |
+| `id`                         | Deterministic destination ID (see §8); exception instances are addressed by their computed instance ID |
+| `status`                     | `'cancelled'` when the event is rule-skipped or the source is cancelled; otherwise copied from the source when non-null |
+
+`recurringEventId` and `originalStartTime` are intentionally excluded: destination instances are addressed by their computed ID (§6.2), so neither belongs in a payload. `attendees` is deliberately not copied. The remaining schema fields (`etag`, `created`, `updated`, `creator`, `organizer`, `htmlLink`, `hangoutLink`, `iCalUID`, ...) are read-only or server-set and never written.
+
+### 5.3 Exception Events
+
+`_syncExceptionEvent(sourceEvent, config, omittedParents, onSync)` handles items with `recurringEventId`:
+
+1. If the parent master is already known absent (`omittedParents`), return immediately.
+2. `buildDestReplica()` produces a payload whose `id` is the computed instance ID (§6.2).
+3. **Apply:** a cancelled/skip-filtered exception is removed by its computed instance ID (`calRemoveEvent`); a live exception is written in place (`calReplaceEvent` — instances are updated, never inserted).
+4. The first attempt tolerates only `410` on the remove path, so a `404` (parent master absent from the destination) propagates. Any `404` triggers the **on-demand master sync**:
+   - Fetch the source master by `recurringEventId`.
+   - If the source master is gone, cancelled, or skip-filtered, `syncEvent()` removes the destination master replica (which cascades to its instances) and records the parent in `omittedParents`; the exception is not synced.
+   - Otherwise the destination master is (re)created first, then the exception application is retried with the default `[404, 410]` tolerances.
 
 ---
 
@@ -146,53 +179,51 @@ Only the following fields are written to destination events. Arbitrary source fi
 
 ### 6.1 Master Events
 
-Recognized by the presence of `item.recurrence`. The `recurrence` array is copied directly to the destination payload. Processed by `processSyncItem()`.
+Recognized by the presence of `item.recurrence`. The `recurrence` array is shallow-copied to the destination payload. Processed by `syncEvent()`.
 
 ### 6.2 Exception Events
 
-Recognized by the presence of `item.recurringEventId`. Handled by `processExceptionSyncItem()`.
+Recognized by the presence of `item.recurringEventId`. Handled by `_syncExceptionEvent()`.
 
 **Destination instance ID computation:**
+
 Google Calendar instance IDs follow the format `<masterId>_<timestamp>`. The destination instance ID is:
 
 ```
 destInstanceId = destMasterId + '_' + sourceSuffix
 ```
 
-where `destMasterId = getDestinationEventId(sourceCalendarId, item.recurringEventId)` and `sourceSuffix = item.id.slice(item.recurringEventId.length + 1)`. The `getDestinationInstanceId()` utility encapsulates this.
+where `destMasterId = _makeDestId(sourceCalendarId, item.recurringEventId)` and `sourceSuffix = item.id.slice(item.recurringEventId.length + 1)`. `_makeDestId()` encapsulates the prefix computation.
 
-The suffix must be derived by slicing at `recurringEventId.length + 1`, never by splitting the ID on `_`: source event IDs (e.g. imported `c_...` IDs) can themselves contain underscores, and a split-based derivation corrupts both the master prefix and the timestamp suffix.
+The suffix must be derived by slicing at `recurringEventId.length + 1`, never by splitting the source ID on `_`: source event IDs (e.g. imported `c_...` IDs) can themselves contain underscores, and a split-based derivation corrupts both the master prefix and the timestamp suffix.
 
-**Instances are updated, never inserted.**
-Once the destination master series exists, every destination instance is derived from it and addressable by its computed ID `destMasterId_<timestamp>` — `events.get()` resolves the ID even for instances never materialized as exceptions, and `Calendar.Events.update()` on that ID materializes the exception without needing `recurringEventId`/`originalStartTime` in the body (empirically verified; see `spec/google-api-notes.md`, "Empirically verified API behaviors"). This is what the existing working engine does: `processExceptionSyncItem()` (`src/SyncEngine.gs`) updates the computed instance ID directly and has no insert path for exceptions. The API's base32hex custom-ID charset (`[a-v0-9]`, no underscores) constrains only IDs the caller supplies to `insert()` — Google-generated instance IDs contain underscores, so the charset is not the operative constraint here; an exception needs no custom ID because it is addressed as an instance of the destination master. `insert()` is used only for non-exception events, with a deterministic `gcs`-prefixed ID. The destination master must therefore exist before any exception is synced (see below). A skipped or cancelled exception is removed from the destination by its computed instance ID — matching `processExceptionSyncItem()`'s cancel/skip path — never updated or inserted. A cancelled source exception arrives as a sparse sync item (no `summary`/`start`/`end`), but its `id` and `recurringEventId` are present, so the computed instance ID is still derivable.
+**Instances are updated or removed, never inserted.**
 
-**On-demand master sync:**
-Before updating the destination exception, `processExceptionSyncItem()` verifies the destination master exists via `Calendar.Events.get()`. If the master is absent (404):
+Once the destination master series exists, every destination instance is derived from it and addressable by its computed ID `destMasterId_<timestamp>` — `events.update()` on that ID materializes the exception without needing `recurringEventId`/`originalStartTime` in the body (empirically verified; see `spec/google-api-notes.md`, "Empirically verified API behaviors"). `insert()` is used only for non-exception events, with the deterministic `gcs`-prefixed ID. The destination master must therefore exist before an exception can be materialized (see the on-demand master sync in §5.3). A cancelled source exception arrives as a sparse sync item (no `summary`/`start`/`end`), but its `id` and `recurringEventId` are present, so the computed instance ID is still derivable.
 
-1. Fetches the source master directly by ID (`item.recurringEventId`).
-2. Evaluates the master's summary against rules. If skip-filtered, the exception is also skipped.
-3. Calls `processSyncItem()` on the source master to create it on the destination.
+**Master-before-exception ordering is handled by the on-demand path, not by partitioning.**
 
-**Sort order (masters before exceptions):**
-In `syncSourceWindow()`, each page of results is partitioned into masters and exceptions buckets; masters are processed first. This ordering guarantee is per page (not global across pages); the on-demand master sync path handles cross-page master/exception ordering.
+`syncLoop()` streams items in list order; it does not sort masters ahead of exceptions. The 404-triggered on-demand master sync in §5.3 is what pulls in a destination master whose source master fell outside the synced window, so an exception is never applied before its master exists.
 
 **Exception rule evaluation:**
+
 Each exception's summary is evaluated independently — the master's rule result is not inherited:
 
 - If the exception's summary matches the same rule as the master (common for reschedules that don't change the title), the same prefix and color apply.
 - If no rule matches the exception summary, `colorId` is omitted and the destination instance inherits the series color from the destination master.
 - If the exception's summary matches a different rule than the master, that rule's prefix/color apply.
-- If the destination master is absent and the on-demand fetch reveals the source master is skip-filtered, the exception is also skipped — regardless of the exception's own summary.
+- If the on-demand master fetch reveals the source master is skip-filtered, the exception is also skipped — regardless of the exception's own summary.
 
 ---
 
 ## 7. Rule Engine
 
-`evaluateRules(summary, rules)` (RuleEngine.gs):
+`evaluateRules(summary, rules)` (`src/RuleEngine.gs`):
 
 - A missing or `null` summary is treated as `''`.
 - Rules are evaluated in order; the first matching rule wins.
 - A rule with no `match` field is a catch-all that always matches.
+- `RegExp` objects with the `g`/`y` flag are reset (`lastIndex = 0`) before each test, since `test()` is stateful for those.
 - Returns `{ skip: boolean, prefix: string, colorId: string|null }`.
 
 | Rule property | Type          | Effect                                          |
@@ -206,43 +237,53 @@ Each exception's summary is evaluated independently — the master's rule result
 
 ## 8. Deterministic ID Mapping
 
+`_makeDestId(calendarId, baseId, instanceSuffix = '')` (`src/NewSync.js`):
+
+```javascript
+destEventId = 'gcs' + md5(calendarId + '::' + baseId)
+```
+
+- MD5 hex output (`[0-9a-f]`) is a strict subset of Google's base32hex event ID charset (`^[a-v0-9]+$`). The `gcs` prefix ensures the ID begins with a letter. The `::` separator prevents collisions across different calendar/event ID combinations.
+- With an `instanceSuffix`, an underscore and the suffix are appended.
+
 ### Regular Events
 
 ```javascript
-destEventId = 'gcs' + md5(sourceCalendarId + '::' + sourceEventId)
+destEventId = _makeDestId(sourceCalendarId, sourceEvent.id)
 ```
-
-MD5 hex output (`[0-9a-f]`) is a strict subset of Google's base32hex event ID charset (`^[a-v0-9]+$`). The `gcs` prefix ensures the ID begins with a letter. The `::` separator prevents collisions across different calendar/event ID combinations.
-
-Do not use the superseded `"src" + base32hex-strip` formula — it risks collisions.
 
 ### Exception Instances
 
 ```javascript
-destInstanceId = destMasterId + '_' + sourceSuffix
+destInstanceId = _makeDestId(sourceCalendarId, recurringEventId) + '_' + sourceSuffix
 ```
 
-See §6.2 for derivation.
-
-`sourceSuffix` is derived by slicing at the master ID length, never by splitting the source ID on `_` (source IDs can contain underscores; see §6.2).
+See §6.2 for suffix derivation (slice, never split).
 
 ---
 
 ## 9. State Management
 
-### PropertiesService (UserProperties)
+### ScriptProperties (UserProperties)
 
-| Key                                              | Value                                       |
-|--------------------------------------------------|---------------------------------------------|
-| `SYNC_TOKEN_<encodedSourceCalendarId>`           | Incremental sync token for a source calendar|
-| `CONFIG_HASH_<encodedSrc>_<encodedDest>`         | MD5 of normalized rules for a calendar pair |
-| `MANAGED_CALENDAR_REGISTRY_V1`                   | JSON snapshot of managed pairs/sources      |
+State is stored in **three** UserProperties keys, each holding a JSON object keyed by the pair key `srcId::dstId` (see `ScriptProperties`, `src/AppConfig.gs`):
 
-Keys use `encodeURIComponent()` on calendar IDs.
+| UserProperties key | Per-pair value                                   |
+|--------------------|--------------------------------------------------|
+| `syncToken`        | Incremental sync token for the source calendar   |
+| `configHash`       | MD5 of `JSON.stringify(rules)` for the pair      |
+| `syncTime`         | Epoch millis of the last successful sync         |
 
-`MANAGED_CALENDAR_REGISTRY_V1` is initialized from a successful run of the current configuration. Removal cleanup depends on this snapshot, so mappings removed before the registry is first initialized are not inferred retroactively.
+Keys are literally `sourceCalendarId::destinationCalendarId` (calendar IDs are not URL-encoded in state keys).
 
-**Config hash computation:** Rules are normalized before hashing via `normalizeConfigForHash()`, which converts RegExp values to their `toString()` representation and sorts object keys for deterministic ordering. Plain `JSON.stringify` is not used alone because it silently drops RegExp values.
+**Config hash:** `ActiveConfig.hash()` is `generateMd5Hash(JSON.stringify(this.rules))`. Caution: `JSON.stringify` serializes `RegExp` values as `{}`, so two configs differing only in a regex pattern produce identical hashes — a pure-regex change is not detected as a config change and does not force a baseline sync (see §14).
+
+**State lifecycle** (`qualifyConfig()`):
+
+- Active pairs: state is kept and updated after each successful sync.
+- A pair whose config entry is removed or fails to resolve keeps its state for `STATE_RECLAIM_DAYS` (30) after its recorded `syncTime`, giving time to fix a renamed or re-added calendar. After that the state is dismissed — cleared from UserProperties. Replicas are left in place and reconciled by a future baseline sync.
+- Pairs with no recorded `syncTime` are dismissed immediately.
+- There is no persisted "managed registry" snapshot; the current `CALENDAR_CONFIG` is the source of truth each run.
 
 ### Extended Properties on Destination Events
 
@@ -259,47 +300,50 @@ Every destination event carries:
 }
 ```
 
-Used for: loop protection (§10), reconciliation orphan detection, and traceability.
+Used for: loop protection (§10), baseline orphan cleanup (§4.3), and traceability.
 
 ---
 
 ## 10. Loop Protection
 
-At the top of `processSyncItem()`, if `item.extendedProperties?.private?.sourceCalendarId` is set, the event is a sync replica and is skipped with `console.warn`. This prevents infinite feedback loops if a destination calendar is accidentally configured as a source.
-
-A parallel check in `executeReconciliationSync()` emits the same warning with an `"in reconciliation"` suffix to distinguish the call site in logs.
+At the top of `syncEvent()`, if `item.extendedProperties?.private?.sourceCalendarId` is set, the item is a sync replica and is skipped with `console.warn`. This prevents infinite feedback loops if a destination calendar is accidentally configured as a source.
 
 ---
 
 ## 11. Concurrency and Timeout Management
 
-- **Script lock:** `LockService.getScriptLock().tryLock(LOCK_TIMEOUT_MS)` (30 000 ms) — if another instance holds the lock, the current execution exits immediately with a warning.
-- **`EXECUTION_TIMEOUT_MS`** (300 000 ms) — 5-minute safety threshold within Apps Script's 6-minute hard limit.
-- **`LOOKBACK_DAYS`** (7) — how far back source-side tokenless sync and reconciliation AllowedSet queries look. Events older than 7 days are not directly scanned in tokenless source-window sync.
-- **`EXECUTION_START_MS`** — set at module load time. Used only for timeout checks via `hasExecutionTimeRemainingMs()`, not for user-visible elapsed time (which uses a locally captured `Date.now()` after lock acquisition).
-- **`hasExecutionTimeRemainingMs(minimumRemainingMs)`** — returns false if the remaining execution budget is less than `minimumRemainingMs`.
-- **`WRITE_PACING_DELAY_MS`** (500 ms) — inserted after each calendar write API call to reduce quota pressure. Skipped if insufficient time remains.
+- **Lock:** `LockService.getUserLock().tryLock(SCRIPT_LOCK_TIMEOUT_MS)` (30 000 ms) — if another instance holds the lock, `main()` logs at `console.error` and exits.
+- **`SCRIPT_TIMEOUT_MS`** (315 000 ms, "5m 15s") — soft deadline chosen to shut down gracefully inside Apps Script's 6-minute hard limit.
+- **`SCRIPT_BASETIME`** (`src/00Init.gs`) — `Date.now()` captured at module load; the soft deadline is `SCRIPT_BASETIME + SCRIPT_TIMEOUT_MS`.
+- **`scriptTimeCheck()`** (`src/Utils.gs`) — throws `SoftTimeoutError` once `Date.now()` reaches the deadline. Called before each stream and before each event's writes. `main()` catches `SoftTimeoutError`, logs a warning, and exits; the interrupted pair's state is not persisted, so the next run re-syncs it.
+- **`LOOKBACK_DAYS`** (config, default `SCRIPT_DEFAULT_LOOKBACK_DAYS` = 7) — how far back baseline sync scans (`[now − LOOKBACK_DAYS, ∞)`).
+- **`STATE_RECLAIM_DAYS`** (30) — grace period before stale per-pair state is dismissed.
+- **Write pacing:** `_paceCalendarWrite()` (`src/CalendarApi.js`) sleeps as needed to guarantee ≥500 ms between write operations (insert/update/remove) on the same calendar. The pacing sleep runs unconditionally and is not skipped when time is short.
 
 ---
 
 ## 12. Error Handling
 
-| Condition                               | Response                                                           |
-|-----------------------------------------|--------------------------------------------------------------------|
-| `HTTP 410 Gone`                         | Sync token expired — trigger reconciliation sync                   |
-| `HTTP 404 Not Found` on event get       | Event absent from destination — use `insert()` instead of `update()` |
-| `HTTP 404/410` on event remove          | Event already gone — silently ignored                              |
-| `item.status === 'cancelled'`           | Remove from destination calendar                                   |
-| Calendar reference resolution failure   | `console.warn`, skip the pair, continue with remaining pairs       |
-| Unexpected error in `syncCalendarPair()`| Logged at `console.error`; remaining pairs continue                |
+| Condition                                              | Response                                                            |
+|--------------------------------------------------------|---------------------------------------------------------------------|
+| `HTTP 410` (`fullSyncRequired`) on incremental sync     | `incrementalSync()` returns null; caller falls back to baseline `initialSync()` |
+| `404` on optimistic `calReplaceEvent()` (likely-new path) | Fall back to `calInsertEvent()`                                   |
+| `409` on optimistic `calInsertEvent()` (collision)      | Fall back to `calReplaceEvent()`                                    |
+| `404` on an exception's replace/remove                  | Parent-missing → on-demand master sync (§5.3)                       |
+| `404`/`410` on `calRemoveEvent()` (default tolerances)  | Event already gone — ignored                                        |
+| `item.status === 'cancelled'` (or rule `skip`)          | Destination replica removed                                         |
+| Unknown source calendar ID in `calStreamEvents()`       | `console.warn("Calendar not found")`, returns null                  |
+| Calendar reference resolution failure                   | `console.warn`, skip the pair, continue                             |
+| `SoftTimeoutError`                                      | Caught in `main()`; loop aborts, state not persisted                |
+| Any other error in a pair                               | Propagates; execution aborts (no per-pair recovery)                 |
 
 ---
 
 ## 13. API Requirements
 
-- **Advanced Calendar Service** must be enabled in the Apps Script project (Services → Calendar API).
-- `singleEvents` must be `false` for all `Events.list` calls. `singleEvents: true` disables `syncToken` support.
-- Required OAuth scopes are initialized on first manual execution of `orchestrateCalendarSync()`.
+- **Advanced Calendar Service** must be enabled (`appsscript.json` declares the Calendar v3 service).
+- `singleEvents` must be `false` for all `Events.list` calls — `syncLoop()` forces it (`singleEvents: true` disables `syncToken` support). `syncLoop()` also forces `eventTypes: 'default'`.
+- Required OAuth scopes are initialized on the first manual execution of `main()`.
 
 ---
 
@@ -307,8 +351,16 @@ A parallel check in `executeReconciliationSync()` emits the same warning with an
 
 ### Multi-destination fan-out
 
-Sync tokens and config hashes are tracked per source→destination pair (e.g. keys like `SYNC_TOKEN_<encodedSrc>_<encodedDest>`). Fan-out — configuring the same source to sync to multiple destinations — is supported; state is preserved per pair. Operators should be aware that each pair maintains its own token and hash and should configure mappings intentionally.
+Sync tokens, config hashes, and sync times are tracked per source→destination pair (map keys like `srcId::dstId`). Fan-out — configuring the same source to sync to multiple destinations — is supported; state is preserved per pair. Operators should be aware that each pair maintains its own token and hash and should configure mappings intentionally.
 
-### Full-sync orphan cleanup
+### Baseline orphan cleanup
 
-`initialSync()` runs an orphan cleanup pass after every full sync: it lists all destination events tagged with the source calendar ID (via the `privateExtendedProperty` filter) and removes any whose ID was not re-synced in the just-scanned `[now − LOOKBACK_DAYS, ∞)` window. Because destination IDs are deterministic (§8), re-synced replicas are addressed in place and always survive the pass; everything else — events deleted from the source, items that now match `skip`, and replicas older than the lookback window — is removed unconditionally. The pass runs even when nothing was re-synced in the window (e.g. a skip-all rule), so a full sync also acts as a complete wipe of a pair's tagged replicas.
+Every baseline sync ends with an orphan cleanup pass: it lists all destination events tagged with the source calendar ID (via the `privateExtendedProperty` filter) and removes any whose ID was not re-synced in the just-scanned `[now − LOOKBACK_DAYS, ∞)` window. Because destination IDs are deterministic (§8), re-synced replicas are addressed in place and always survive the pass; everything else — events deleted from the source, items that now match `skip`, and replicas older than the lookback window — is removed unconditionally. The pass runs even when nothing was re-synced in the window (e.g. a skip-all rule), so a baseline sync also acts as a complete wipe of a pair's tagged replicas.
+
+### Removed mappings leave replicas behind
+
+Removing a mapping from `CALENDAR_CONFIG` only dismisses the pair's state (after the `STATE_RECLAIM_DAYS` grace period); destination replicas are left in place. They are only cleaned up by a future baseline sync, which requires the pair to be re-added — there is no mechanism that scans and removes replicas for a mapping that no longer exists.
+
+### Config-hash blind spot for regex-only changes
+
+The config hash uses plain `JSON.stringify`, which serializes `RegExp` values as `{}`. Changing only a rule's regex (not its `prefix`/`colorId`/`skip`) therefore does not change the hash, so it is not detected as a config change and does not trigger a baseline sync.
