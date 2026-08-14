@@ -123,8 +123,8 @@ function qualifyConfig(props) {
 
     // Active if each side resolves to exactly one ID and they differ
     if (sourceIds.size === 1 && destIds.size === 1) {
-      const sourceId = Array.from(sourceIds)[0];
-      const destId = Array.from(destIds)[0];
+      const sourceId = sourceIds.values().next().value;
+      const destId = destIds.values().next().value;
 
       if (sourceId === destId) {
         // Absurd: same calendar for source and destination. Skip.
@@ -170,7 +170,7 @@ function qualifyConfig(props) {
   // was ever recorded) dismiss it.
   const now = Date.now();
   const reclaimMs = STATE_RECLAIM_DAYS * 86400000;
-  for (const key of Array.from(propsPairs)) {
+  for (const key of propsPairs) {
     const [sourceId, destId] = key.split('::');
     const lastSync = props.syncTime?.[key] ?? 0;
     if (now - lastSync < reclaimMs) { continue; }
