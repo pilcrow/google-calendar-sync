@@ -69,12 +69,14 @@ const CALENDAR_CONFIG = [
 
 ## 3. Calendar Reference Resolution
 
-`source` and `destination` may each be a calendar ID or a display name (the effective name shown in the Google Calendar UI: `summaryOverride` when set, otherwise `summary`). Resolution happens at runtime in `qualifyConfig()` (`src/AppConfig.gs`).
+`source` and `destination` may each be a calendar ID or a display name — a calendar's underlying title (`summary`) or its user-set override (`summaryOverride`). A name reference matches a calendar when it equals either field. Resolution happens at runtime in `qualifyConfig()` (`src/AppConfig.gs`).
 
 For each side, the set of candidate IDs is the union of:
 
 1. an exact match against a known calendar ID, and
-2. all calendar IDs whose display name matches.
+2. all calendar IDs whose `summary` or `summaryOverride` matches.
+
+Resolution streams the calendar list but retains only calendars whose name or ID is referenced by the config or by remembered state — never the user's full calendar list.
 
 A config entry becomes an active pair only when each side resolves to exactly one ID and the two IDs differ. Everything else is skipped with `console.warn` and processing continues with the remaining entries:
 

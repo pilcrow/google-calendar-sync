@@ -69,13 +69,19 @@ ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
  * configs and a list of stale state keys to dismiss.
  *
  * Config:
- * Any entry whose source calendar name resolves to ONE calendar ID and whose
- * dest calendar name resolves to ONE different calendar ID is an ActiveConfig.
- * Entries that resolve to the same (srcId, dstId) pair are duplicates: all of
- * them are skipped and a warning is logged.
+ * Any entry whose source calendar reference resolves to ONE calendar ID and
+ * whose destination calendar reference resolves to ONE different calendar ID
+ * is an ActiveConfig. A reference may be a calendar ID or a display name —
+ * either a calendar's `summary` or its `summaryOverride`. Entries that resolve
+ * to the same (srcId, dstId) pair are duplicates: all of them are skipped and
+ * a warning is logged.
  *
  * All others are skipped with a warning: unresolvable (zero IDs found),
  * ambiguous (2+ IDs found), or absurd (srcId == dstId).
+ *
+ * Resolution only loads calendars the config references (by name or ID) or
+ * that stored state keys reference (by ID) — never the user's full calendar
+ * list.
  *
  * State:
  *   If srcId::dstId matches an Active config, keep - processing will update
@@ -86,24 +92,32 @@ ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
  *   with no recorded syncTime are dismissed immediately.
  */
 function qualifyConfig(props) {
-  const qualified = [];
+  const active = [];
   const removed = [];
 
-  // Build calendar maps
-  const calMap = new Map();       // calendarId -> display name
-  const nameToIds = new Map();    // display name -> Set(calendarId)
+  // Only calendars the config references (by name or ID) or that remembered
+  // state keys reference (by ID) are loaded — the maps below are bounded by
+  // CALENDAR_CONFIG and the state keys, not by every calendar the user can see.
+  const calReferences = new Set(CALENDAR_CONFIG.flatMap(cc => [cc.source, cc.destination]));
+  const stateKeys = props.allKeys(); // Set of keys like 'srcId::dstId'
+  stateKeys.forEach(key => key.split('::').forEach(id => calReferences.add(id)));
 
-  calStreamCalendars(c => {
-    const name = c.summaryOverride ?? c.summary;
-    calMap.set(c.id, name);
-    if (name) {
-      let ids = nameToIds.get(name);
-      if (!ids) { nameToIds.set(name, ids = new Set()); }
-      ids.add(c.id);
+  const calId2Name = new Map();   // calendarId -> display name
+  const calName2Ids = new Map();  // display name -> Set(calendarId)
+
+  for (const c of calIterCalendars()) {
+    for (const name of [c.summaryOverride, c.summary]) {
+      if (name && calReferences.has(name)) {
+        let ids = calName2Ids.get(name);
+        if (!ids) { calName2Ids.set(name, ids = new Set()); }
+        ids.add(c.id);
+        calReferences.add(c.id);
+      }
     }
-  });
-
-  const propsPairs = props.allKeys(); // Set of keys like 'srcId::dstId'
+    if (calReferences.has(c.id)) {
+      calId2Name.set(c.id, c.summaryOverride ?? c.summary);
+    }
+  }
 
   // Classify configured entries into Active (exact single-ID resolution) or skipped
   const byKey = new Map();        // resolved 'srcId::dstId' -> [ActiveConfig]
@@ -114,12 +128,16 @@ function qualifyConfig(props) {
 
     // A config value may be a literal calendar ID, a display name, or (in a
     // pathological case) both; resolve each interpretation and take the union.
-    if (calMap.has(cc.source)) { sourceIds.add(cc.source); }
-    if (calMap.has(cc.destination)) { destIds.add(cc.destination); }
+    if (calId2Name.has(cc.source)) { sourceIds.add(cc.source); }
+    if (calId2Name.has(cc.destination)) { destIds.add(cc.destination); }
 
     // If the config references a name, add all matching IDs
-    if (nameToIds.has(cc.source)) for (const id of nameToIds.get(cc.source)) { sourceIds.add(id); }
-    if (nameToIds.has(cc.destination)) for (const id of nameToIds.get(cc.destination)) { destIds.add(id); }
+    if (calName2Ids.has(cc.source)) {
+      for (const id of calName2Ids.get(cc.source)) { sourceIds.add(id); }
+    }
+    if (calName2Ids.has(cc.destination)) {
+      for (const id of calName2Ids.get(cc.destination)) { destIds.add(id); }
+    }
 
     // Active if each side resolves to exactly one ID and they differ
     if (sourceIds.size === 1 && destIds.size === 1) {
@@ -159,18 +177,18 @@ function qualifyConfig(props) {
       console.warn(`Multiple config entries for ${key}, skipping all`);
       continue;
     }
-    qualified.push(entries[0]);
-    propsPairs.delete(key);
+    active.push(entries[0]);
+    stateKeys.delete(key);
   }
 
   // Decide which stored state keys to dismiss. Active keys were already deleted
-  // from propsPairs above, so every key here no longer matches an active config.
+  // from stateKeys above, so every key here no longer matches an active config.
   // Hold state for STATE_RECLAIM_DAYS after its last successful sync to give
   // time to fix a renamed or re-added calendar; after that (or when no syncTime
   // was ever recorded) dismiss it.
   const now = Date.now();
   const reclaimMs = STATE_RECLAIM_DAYS * 86400000;
-  for (const key of propsPairs) {
+  for (const key of stateKeys) {
     const [sourceId, destId] = key.split('::');
     const lastSync = props.syncTime?.[key] ?? 0;
     if (now - lastSync < reclaimMs) { continue; }
@@ -179,10 +197,10 @@ function qualifyConfig(props) {
     // reconciled on a future full sync.
     const since = lastSync ? `last synced ${new Date(lastSync).toISOString()}` : 'no recorded sync time';
     console.warn(`Dismissing stale sync state ${sourceId} -> ${destId} (${since})`);
-    removed.push(new InactiveConfig(sourceId, destId, calMap));
+    removed.push(new InactiveConfig(sourceId, destId, calId2Name));
   }
 
-  return [ qualified, removed ];
+  return [ active, removed ];
 }
 
 class RuntimeConfig {

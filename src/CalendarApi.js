@@ -182,14 +182,20 @@ function calStreamEvents(calendarId, params = {}, callback = null) {
   return response?.nextSyncToken;
 }
 
-function calStreamCalendars(callback) {
+/**
+ * Iterate over every calendar the user can reach (hidden ones included),
+ * across paginated CalendarList.list calls.
+ *
+ * @return {IterableIterator<Object>} Each calendar resource in the list
+ */
+function* calIterCalendars() {
   const searchParams = { showHidden: true,
                          maxResults: (API_PAGE_SIZE ?? DEFAULT_API_PAGE_SIZE) };
   do {
     CAL_OPS.apiCalls['CalendarList.list']++;
     const response = Calendar.CalendarList.list(searchParams);
     if (response.items) {
-      response.items.forEach((c) => callback(c));
+      yield* response.items;
     }
     searchParams.pageToken = response.nextPageToken;
   } while (searchParams.pageToken);
