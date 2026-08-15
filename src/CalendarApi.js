@@ -164,6 +164,15 @@ function calOpsSince(calendarId, before) {
 }
 
 /**
+ * Snapshot the calendar API call counters so a caller can report totals.
+ *
+ * @return {Object} A copy of the per-endpoint call counts, e.g. { 'Events.get': 3 }
+ */
+function calApiCallsSnapshot() {
+  return { ...CAL_OPS.apiCalls };
+}
+
+/**
  * A callback accepting a calendar event object.
  *
  * @callback eventCallback

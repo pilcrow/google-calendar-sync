@@ -97,7 +97,7 @@ A config entry becomes an active pair only when each side resolves to exactly on
 4. `mainLoop()`:
    - **Dismissal is state-only.** For each removed pair, the stored state keys are cleared. Synced destination replicas are left untouched; they are reconciled by a future baseline sync if the pair is ever re-added (deterministic IDs make that safe).
    - For each active pair, chooses incremental vs baseline sync (§4.2/§4.3) and persists `syncToken`, `configHash`, and `syncTime` for the pair only after its sync completes successfully.
-5. `storeProperties()` persists the updated state; the lock is released.
+5. `ScriptProperties.store(props)` persists the updated state; the lock is released, and a final `console.info` reports total elapsed time since `SCRIPT_BASETIME` plus per-endpoint calendar API-call counts.
 
 A `SoftTimeoutError` aborts the loop (see §11): the interrupted pair's state is not persisted, so the next run re-syncs it. Any other error propagates out of `mainLoop` (there is no per-pair recovery) and aborts the execution.
 

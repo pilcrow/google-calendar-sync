@@ -33,9 +33,12 @@ function main() {
 
   // Leave
   ScriptProperties.store(props);
-  lock.releaseLock();  
-  // FIXME - log CAL_OPS summary
+  lock.releaseLock();
 
+  const callSummary = Object.entries(calApiCallsSnapshot())
+    .map(([name, count]) => `${name}=${count}`)
+    .join(', ');
+  console.info(`Done in ${Date.now() - SCRIPT_BASETIME}ms; API calls: ${callSummary}`);
 }
 
 function mainLoop(props, active, removed) {
