@@ -93,7 +93,7 @@ ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
  */
 function qualifyConfig(props) {
   const active = [];
-  const removed = [];
+  const stale = [];
 
   // Only calendars the config references (by name or ID) or that remembered
   // state keys reference (by ID) are loaded — the maps below are bounded by
@@ -108,9 +108,7 @@ function qualifyConfig(props) {
   for (const c of calIterCalendars()) {
     for (const name of [c.summaryOverride, c.summary]) {
       if (name && calReferences.has(name)) {
-        let ids = calName2Ids.get(name);
-        if (!ids) { calName2Ids.set(name, ids = new Set()); }
-        ids.add(c.id);
+        calName2Ids.getOrInsert(name, new Set()).add(c.id);
         calReferences.add(c.id);
       }
     }
@@ -156,9 +154,7 @@ function qualifyConfig(props) {
       const ac = new ActiveConfig(cc, props, { sourceId, destId });
       // Defer to the dedup pass below so duplicate (srcId, dstId) pairs are
       // detected before anything is qualified.
-      let entries = byKey.get(ac.key());
-      if (!entries) { byKey.set(ac.key(), entries = []); }
-      entries.push(ac);
+      byKey.getOrInsert(ac.key(), []).push(ac);
     } else {
       // Unresolvable (zero matches) or ambiguous (name matches 2+ calendars)
       const why = [];
@@ -196,14 +192,14 @@ function qualifyConfig(props) {
     // Dismissal is state-only: synced replicas are left untouched and will be
     // reconciled on a future full sync.
     const since = lastSync ? `last synced ${new Date(lastSync).toISOString()}` : 'no recorded sync time';
-    console.warn(`Dismissing stale sync state ${sourceId} -> ${destId} (${since})`);
-    removed.push(new InactiveConfig(sourceId, destId, calId2Name));
+    console.warn(`Identified stale sync state ${sourceId} -> ${destId} (${since})`);
+    stale.push(key);
   }
 
-  return [ active, removed ];
+  return [ active, stale ];
 }
 
-class RuntimeConfig {
+class ActiveConfig {
   _shorten(what, length = 11) {
     if (what.length <= length) { return what; } 
     return `${what.slice(0,4)}...${what.slice(-4)}`;
@@ -218,21 +214,8 @@ class RuntimeConfig {
     ' -> ' +
     `${this.destination || '???'} (${this._shorten(this.destId || '???')})`;
   }
-}
 
-class InactiveConfig extends RuntimeConfig {
-  constructor(sourceId, destId, calId2Name) {
-    super();
-    this.sourceId = sourceId;
-    this.source = calId2Name.get(this.sourceId);
-    this.destId = destId;
-    this.destination = calId2Name.get(this.destId);
-  }
-}
-
-class ActiveConfig extends RuntimeConfig {
   constructor(config, props, resolvedIds) {
-    super();
 
     ['source', 'destination'].forEach( attr => {
       this[attr] = config[attr];

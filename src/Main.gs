@@ -41,9 +41,9 @@ function main() {
 function mainLoop(props, active, removed) {
   // Dismissal is state-only: synced replicas are left untouched and are
   // reconciled on a future full sync.
-  for (const r of removed) {
-    console.warn(`Dismissing sync state ${r.summarize()} (${r.key()})`);
-    props.clear(r.key());
+  for (const key of removed) {
+    console.warn(`Dismissing sync state ${key}`);
+    props.clear(key);
   }
 
   for (const c of active) {

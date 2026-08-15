@@ -8,7 +8,7 @@
 ambiguous, absurd, zero-match, duplicate-key, and `STATE_RECLAIM_DAYS` stale-state
 dismissal — but nothing exercises it in a test. `Test.gs` deliberately avoids
 project code (Calendar API probes only), and no harness covers `qualifyConfig` or
-the `RuntimeConfig`/`ActiveConfig`/`InactiveConfig` classes. Add unit tests for
+the `ActiveConfig` class. Add unit tests for
 the classifier before relying on its behavior.
 
 #### Implementation plan (recorded for a future session)
@@ -47,7 +47,8 @@ loading (only referenced calendars retained), both-field name matching
 - Bounded loading (white-box, above).
 - Stale dismissal: no syncTime → immediate; within window → held; past window →
   dismissed; active pairs kept.
-- `InactiveConfig` display-name lookup and `summarize()`.
+- Stale dismissal returns plain state keys and logs the named
+  `Identified stale sync state ...` message.
 - `ScriptProperties.load()`/`store()` round-trip (stub `PropertiesService`).
 - Separate small test for `calIterCalendars()` multi-page pagination
   (`nextPageToken` traversal).

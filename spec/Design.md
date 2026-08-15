@@ -17,7 +17,7 @@ Apps Script loads project files into a single shared global namespace, so cross-
 | File                | Role                                                                                       |
 |---------------------|--------------------------------------------------------------------------------------------|
 | `00Init.gs`         | Script globals: `SCRIPT_BASETIME`, `SCRIPT_TIMEOUT_MS`, `SCRIPT_LOCK_TIMEOUT_MS`, `STATE_RECLAIM_DAYS` |
-| `AppConfig.gs`      | `ScriptProperties` (UserProperties-backed per-pair state), `qualifyConfig()` (calendar resolution and stale-state dismissal), `RuntimeConfig`/`ActiveConfig`/`InactiveConfig` |
+| `AppConfig.gs`      | `ScriptProperties` (UserProperties-backed per-pair state), `qualifyConfig()` (calendar resolution and stale-state dismissal), `ActiveConfig` |
 | `CalendarApi.js`    | `cal*` wrappers over the Calendar v3 API: write pacing, pagination, `syncToken` extraction, API-call accounting (`CAL_OPS`) |
 | `Config.gs`         | Human-editable configuration (gitignored; contains personal calendar IDs)                    |
 | `Config.gs.example` | Committed template; must be kept in structural sync with `Config.gs`                         |
@@ -26,8 +26,6 @@ Apps Script loads project files into a single shared global namespace, so cross-
 | `RuleEngine.gs`     | `evaluateRules()`                                                                            |
 | `Utils.gs`          | `generateMd5Hash()`, `SoftTimeoutError`, `scriptTimeCheck()`                                 |
 | `appsscript.json`   | Apps Script manifest: V8 runtime, Calendar v3 advanced service, timezone                     |
-
-**Note on `src/HandleConfig.gs`:** an unreconciled work-in-progress duplicate of `AppConfig.gs`. It redeclares `ScriptProperties`, the `RuntimeConfig` classes, and `qualifyConfig()`. Deploying it alongside `AppConfig.gs` fails to load (duplicate top-level `class` declarations are a V8 `SyntaxError`). It must be reconciled with `AppConfig.gs` or deleted before the project can run.
 
 ### Coding Conventions
 
