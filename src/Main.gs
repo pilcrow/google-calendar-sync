@@ -80,7 +80,7 @@ function mainLoop(props, active, removed) {
       why = 'new config';
     }
 
-    const lookbackDays = LOOKBACK_DAYS ?? SCRIPT_DEFAULT_LOOKBACK_DAYS;
+    const lookbackDays = (typeof LOOKBACK_DAYS !== 'undefined' ? LOOKBACK_DAYS : SCRIPT_DEFAULT_LOOKBACK_DAYS);
     const startWhen = new Date();
     startWhen.setDate(startWhen.getDate() - lookbackDays);
     console.info(`Begin baseline sync (${why}) ${c.summarize()}, looking back ${lookbackDays} to ${startWhen.toISOString()}`);

@@ -195,7 +195,7 @@ function calApiCallsSnapshot() {
 function calStreamEvents(calendarId, params = {}, callback = null) {
   let response = null;
 
-  const searchParams = { ...params, maxResults: (API_PAGE_SIZE ?? DEFAULT_API_PAGE_SIZE) };
+  const searchParams = { ...params, maxResults: (typeof API_PAGE_SIZE !== 'undefined' ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE) };
   delete searchParams.pageToken;
 
   do {
@@ -227,7 +227,7 @@ function calStreamEvents(calendarId, params = {}, callback = null) {
  */
 function* calIterCalendars() {
   const searchParams = { showHidden: true,
-                         maxResults: (API_PAGE_SIZE ?? DEFAULT_API_PAGE_SIZE) };
+                         maxResults: (typeof API_PAGE_SIZE !== 'undefined' ? API_PAGE_SIZE : DEFAULT_API_PAGE_SIZE) };
   do {
     CAL_OPS.apiCalls['CalendarList.list']++;
     const response = Calendar.CalendarList.list(searchParams);
