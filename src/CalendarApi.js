@@ -139,6 +139,31 @@ function calReplaceEvent(calendarId, event, toleratedErrors = []) {
 }
 
 /**
+ * Snapshot the write-ops counters for the given calendar so a caller can
+ * measure a pair's added/removed/updated delta with calOpsSince().
+ *
+ * @param {string} calendarId - The calendar to snapshot
+ * @return {Object} A copy of the counters: { added, removed, updated }
+ */
+function calOpsSnapshot(calendarId) {
+  return { ...(CAL_OPS.events[calendarId] ?? DEFAULT_OPS_ENTRY) };
+}
+
+/**
+ * Count the writes to the given calendar since a prior calOpsSnapshot().
+ *
+ * @param {string} calendarId - The calendar to read
+ * @param {Object} before - A snapshot previously returned by calOpsSnapshot()
+ * @return {Object} { added, removed, updated } deltas
+ */
+function calOpsSince(calendarId, before) {
+  const now = CAL_OPS.events[calendarId] ?? DEFAULT_OPS_ENTRY;
+  return { added:   now.added   - before.added,
+           removed: now.removed - before.removed,
+           updated: now.updated - before.updated };
+}
+
+/**
  * A callback accepting a calendar event object.
  *
  * @callback eventCallback

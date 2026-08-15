@@ -47,6 +47,14 @@ function mainLoop(props, active, removed) {
   }
 
   for (const c of active) {
+    const started = Date.now();
+    const opsBefore = calOpsSnapshot(c.destId);
+    const summarizePair = () => {
+      const ops = calOpsSince(c.destId, opsBefore);
+      console.info(`Finished ${c.summarize()} in ${Date.now() - started}ms: ` +
+        `+${ops.added} -${ops.removed} ~${ops.updated}`);
+    };
+
     let nextSyncToken = null;
     let why;
 
@@ -57,7 +65,7 @@ function mainLoop(props, active, removed) {
         props.update(c.key(), { syncToken: nextSyncToken,
                           configHash: c.hash(),
                           syncTime: Date.now() });
-        console.info('Finished');
+        summarizePair();
         continue;
       }
 
@@ -79,6 +87,6 @@ function mainLoop(props, active, removed) {
                         configHash: c.hash(),
                         syncTime: Date.now() });
     }
-    console.info('Finished');
+    summarizePair();
   }
 }
