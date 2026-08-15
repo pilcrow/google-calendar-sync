@@ -93,7 +93,7 @@ A config entry becomes an active pair only when each side resolves to exactly on
 
 1. Acquires a lock (`LockService.getUserLock().tryLock(SCRIPT_LOCK_TIMEOUT_MS)`, 30 s). If the lock cannot be acquired, logs at `console.error` and exits.
 2. Loads per-pair state via `ScriptProperties.load()`.
-3. Calls `qualifyConfig(props)` to split `CALENDAR_CONFIG` into active pairs and removed (stale-state) pairs (§3).
+3. Calls `qualifyConfig(props)` to split `CALENDAR_CONFIG` into active pairs, remembered state (removed pairs still within the `STATE_RECLAIM_DAYS` grace window), and removed (stale-state) pairs (§3).
 4. `mainLoop()`:
    - **Dismissal is state-only.** For each removed pair, the stored state keys are cleared. Synced destination replicas are left untouched; they are reconciled by a future baseline sync if the pair is ever re-added (deterministic IDs make that safe).
    - For each active pair, chooses incremental vs baseline sync (§4.2/§4.3) and persists `syncToken`, `configHash`, and `syncTime` for the pair only after its sync completes successfully.

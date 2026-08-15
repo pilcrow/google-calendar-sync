@@ -66,7 +66,8 @@ ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
 
 /**
  * Turn CALENDAR_CONFIG and the stored script properties into Active (sync)
- * configs and a list of stale state keys to dismiss.
+ * configs, the state keys still remembered within the reclaim window, and the
+ * stale state keys to dismiss.
  *
  * Config:
  * Any entry whose source calendar reference resolves to ONE calendar ID and
@@ -87,12 +88,17 @@ ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
  *   If srcId::dstId matches an Active config, keep - processing will update
  *   All other stored state is held for STATE_RECLAIM_DAYS after its last
  *   successful sync (props.syncTime), giving time to fix a renamed or re-added
- *   calendar. After that the pair's state is dismissed (state cleared; synced
- *   replicas are left untouched and reconciled on a future full sync). Keys
- *   with no recorded syncTime are dismissed immediately.
+ *   calendar. Keys still within the window are returned as remembered. After
+ *   that the pair's state is dismissed (state cleared; synced replicas are
+ *   left untouched and reconciled on a future full sync). Keys with no
+ *   recorded syncTime are dismissed immediately.
+ *
+ * @return {[ActiveConfig[], string[], string[]]} [active configs,
+ *         remembered state keys (within reclaim window), stale keys to dismiss]
  */
 function qualifyConfig(props) {
   const active = [];
+  const remembered = [];
   const stale = [];
 
   // Only calendars the config references (by name or ID) or that remembered
@@ -187,7 +193,10 @@ function qualifyConfig(props) {
   for (const key of stateKeys) {
     const [sourceId, destId] = key.split('::');
     const lastSync = props.syncTime?.[key] ?? 0;
-    if (now - lastSync < reclaimMs) { continue; }
+    if (now - lastSync < reclaimMs) {
+      remembered.push(key);
+      continue;
+    }
 
     // Dismissal is state-only: synced replicas are left untouched and will be
     // reconciled on a future full sync.
@@ -196,7 +205,7 @@ function qualifyConfig(props) {
     stale.push(key);
   }
 
-  return [ active, stale ];
+  return [ active, remembered, stale ];
 }
 
 class ActiveConfig {

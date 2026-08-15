@@ -16,11 +16,12 @@ function main() {
 
   // Load
   const props = ScriptProperties.load();
-  const [ active, removed ] = qualifyConfig(props);
+  const [ active, remembered, removed ] = qualifyConfig(props);
   {
     const nSource = (new Set(active.map(a => a.sourceId))).size;
     const nDest = (new Set(active.map(a => a.destId))).size;
-    console.info(`${active.length} pairs to sync (${nSource} source, ${nDest} dest), ${removed.length} pairs to dismiss`);
+    console.info(`${active.length} pairs to sync (${nSource} source, ${nDest} dest), ` +
+                 `${remembered.length} removed pairs remembered, ${removed.length} removed pairs to forget`);
   }
 
   // Loop
