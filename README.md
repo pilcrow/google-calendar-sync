@@ -87,7 +87,7 @@ Optional overrides (shown commented out in `src/Config.gs.example`):
 clasp push
 ```
 
-**Using the Apps Script IDE:** Create a script file for each `src/*.gs` and `src/*.js` file and paste in the contents.
+**Using the Apps Script IDE:** Create a script file for each `src/*.gs` file and paste in the contents.
 
 ### 3. Enable the Advanced Calendar Service
 

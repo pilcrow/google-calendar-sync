@@ -12,24 +12,24 @@ Multiple source calendars sync one-way into one or more destination calendars. E
 
 ### File Structure
 
-Apps Script loads project files into a single shared global namespace, so cross-file references are resolved by name. Both `.gs` and `.js` files are part of the deployed project.
+Apps Script loads project files into a single shared global namespace, so cross-file references are resolved by name. All repository-owned script files use the `.gs` extension, which is part of the deployed project.
 
 | File                | Role                                                                                       |
 |---------------------|--------------------------------------------------------------------------------------------|
 | `00Init.gs`         | Script globals: `SCRIPT_BASETIME`, `SCRIPT_TIMEOUT_MS`, `SCRIPT_LOCK_TIMEOUT_MS`, `STATE_RECLAIM_DAYS` |
 | `AppConfig.gs`      | `ScriptProperties` (UserProperties-backed per-pair state), `qualifyConfig()` (calendar resolution and stale-state dismissal), `ActiveConfig` |
-| `CalendarApi.js`    | `cal*` wrappers over the Calendar v3 API: write pacing, pagination, `syncToken` extraction, API-call accounting (`CAL_OPS`) |
+| `CalendarApi.gs`    | `cal*` wrappers over the Calendar v3 API: write pacing, pagination, `syncToken` extraction, API-call accounting (`CAL_OPS`) |
 | `Config.gs`         | Human-editable configuration (gitignored; contains personal calendar IDs)                    |
 | `Config.gs.example` | Committed template; must be kept in structural sync with `Config.gs`                         |
 | `Main.gs`           | Orchestration entry point: `main()`, `mainLoop()`; chooses incremental vs baseline sync      |
-| `NewSync.js`        | Sync engine: `_makeDestId()`, `buildDestReplica()`, `syncEvent()`, `_syncExceptionEvent()`, `syncLoop()`, `initialSync()`, `incrementalSync()` |
+| `SyncEngine.gs`      | Sync engine: `_makeDestId()`, `buildDestReplica()`, `syncEvent()`, `_syncExceptionEvent()`, `syncLoop()`, `initialSync()`, `incrementalSync()` |
 | `RuleEngine.gs`     | `evaluateRules()`                                                                            |
 | `Utils.gs`          | `generateMd5Hash()`, `SoftTimeoutError`, `scriptTimeCheck()`                                 |
 | `appsscript.json`   | Apps Script manifest: V8 runtime, Calendar v3 advanced service, timezone                     |
 
 ### Coding Conventions
 
-All repository-owned `.gs`/`.js` files must include the vim modeline as line 1:
+All repository-owned `.gs` files must include the vim modeline as line 1:
 
 ```javascript
 // vim: set ft=javascript ts=2 sw=2 et:
@@ -103,7 +103,7 @@ A `SoftTimeoutError` aborts the loop (see §11): the interrupted pair's state is
 
 ### 4.2 Incremental Sync
 
-`incrementalSync(config, syncToken)` (`src/NewSync.js`) streams the source calendar's changes since `syncToken` (`syncLoop` with `{ syncToken, showDeleted: true }`), calling `syncEvent()` per item. It returns the next `syncToken` on success and **null** when the token has expired (`HTTP 410` with reason `fullSyncRequired`); the caller then falls back to a baseline sync. The new token is persisted only after the pair's sync completes (see §4.1).
+`incrementalSync(config, syncToken)` (`src/SyncEngine.gs`) streams the source calendar's changes since `syncToken` (`syncLoop` with `{ syncToken, showDeleted: true }`), calling `syncEvent()` per item. It returns the next `syncToken` on success and **null** when the token has expired (`HTTP 410` with reason `fullSyncRequired`); the caller then falls back to a baseline sync. The new token is persisted only after the pair's sync completes (see §4.1).
 
 If no `syncToken` is stored for the pair (first run, new config, or changed config), `mainLoop` calls `initialSync()` directly.
 
@@ -115,7 +115,7 @@ Triggered when the pair has no usable `syncToken`:
 - **Changed config** — `ActiveConfig` detects `configHash !== hash()` and nulls the stored `syncToken` (it keeps `syncTime`, which the upsert heuristic uses).
 - **Expired token** — incremental sync returned null on `410 fullSyncRequired`.
 
-`initialSync(config, startFrom)` (`src/NewSync.js`):
+`initialSync(config, startFrom)` (`src/SyncEngine.gs`):
 
 1. Streams `[startFrom, ∞)` on the source (`syncLoop` with `{ timeMin: startFrom, showDeleted: false }`), recording the destination ID of every synced replica.
 2. **Orphan cleanup:** streams all destination events tagged with the source calendar ID (via the `privateExtendedProperty` filter) and removes any whose ID is not in the recorded set — deleted source events, newly skip-filtered events, and replicas older than the lookback window.
@@ -125,7 +125,7 @@ Triggered when the pair has no usable `syncToken`:
 
 ### 4.4 `syncLoop()`
 
-`syncLoop(config, params, onSync)` (`src/NewSync.js`) is the shared streaming core. It forces `singleEvents: false` and `eventTypes: 'default'` (required for `syncToken` support), streams via `calStreamEvents()`, and invokes `syncEvent()` on each item. It returns the next `syncToken`, or `null` when the source calendar ID is unknown.
+`syncLoop(config, params, onSync)` (`src/SyncEngine.gs`) is the shared streaming core. It forces `singleEvents: false` and `eventTypes: 'default'` (required for `syncToken` support), streams via `calStreamEvents()`, and invokes `syncEvent()` on each item. It returns the next `syncToken`, or `null` when the source calendar ID is unknown.
 
 ---
 
@@ -133,7 +133,7 @@ Triggered when the pair has no usable `syncToken`:
 
 ### 5.1 `syncEvent()`
 
-`syncEvent(sourceEvent, config, omittedParents, onSync)` (`src/NewSync.js`) processes a single source item:
+`syncEvent(sourceEvent, config, omittedParents, onSync)` (`src/SyncEngine.gs`) processes a single source item:
 
 1. **Loop guard:** If `sourceEvent.extendedProperties?.private?.sourceCalendarId` is set, the item is a sync replica — log a warning and return. (See §10.)
 2. **Time check:** `scriptTimeCheck()`.
@@ -237,7 +237,7 @@ Each exception's summary is evaluated independently — the master's rule result
 
 ## 8. Deterministic ID Mapping
 
-`_makeDestId(calendarId, baseId, instanceSuffix = '')` (`src/NewSync.js`):
+`_makeDestId(calendarId, baseId, instanceSuffix = '')` (`src/SyncEngine.gs`):
 
 ```javascript
 destEventId = 'gcs' + md5(calendarId + '::' + baseId)
@@ -318,7 +318,7 @@ At the top of `syncEvent()`, if `item.extendedProperties?.private?.sourceCalenda
 - **`scriptTimeCheck()`** (`src/Utils.gs`) — throws `SoftTimeoutError` once `Date.now()` reaches the deadline. Called before each stream and before each event's writes. `main()` catches `SoftTimeoutError`, logs a warning, and exits; the interrupted pair's state is not persisted, so the next run re-syncs it.
 - **`LOOKBACK_DAYS`** (config, default `SCRIPT_DEFAULT_LOOKBACK_DAYS` = 7) — how far back baseline sync scans (`[now − LOOKBACK_DAYS, ∞)`).
 - **`STATE_RECLAIM_DAYS`** (30) — grace period before stale per-pair state is dismissed.
-- **Write pacing:** `_paceCalendarWrite()` (`src/CalendarApi.js`) sleeps as needed to guarantee ≥500 ms between write operations (insert/update/remove) on the same calendar. The pacing sleep runs unconditionally and is not skipped when time is short.
+- **Write pacing:** `_paceCalendarWrite()` (`src/CalendarApi.gs`) sleeps as needed to guarantee ≥500 ms between write operations (insert/update/remove) on the same calendar. The pacing sleep runs unconditionally and is not skipped when time is short.
 
 ---
 
