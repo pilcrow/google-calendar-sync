@@ -186,7 +186,7 @@ function calStreamEvents(calendarId, params = {}, callback = null) {
  * Iterate over every calendar the user can reach (hidden ones included),
  * across paginated CalendarList.list calls.
  *
- * @return {IterableIterator<Object>} Each calendar resource in the list
+ * @yields {Object} The next calendar resource
  */
 function* calIterCalendars() {
   const searchParams = { showHidden: true,
