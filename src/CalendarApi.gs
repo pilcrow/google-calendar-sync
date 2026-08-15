@@ -30,7 +30,7 @@ const _paceCalendarWrite = (function() {
 
   return function(calendarId) {
     const now = Date.now();
-    const elapsedSinceLastWrite = now - (LAST_WRITE_OP[calendarId] ||= 0);
+    const elapsedSinceLastWrite = now - (LAST_WRITE_OP[calendarId] || 0);
     let zzz = 0;
     if (elapsedSinceLastWrite < 500) {
       zzz = 500 - elapsedSinceLastWrite;
@@ -80,7 +80,8 @@ function calRemoveEvent(calendarId, eventId, toleratedErrors = [404, 410]) {
   CAL_OPS.apiCalls[ 'Events.remove' ]++;
   try {
     Calendar.Events.remove(calendarId, eventId);
-    (CAL_OPS.events[calendarId] ||= { ...DEFAULT_OPS_ENTRY }).removed++;
+    if (!CAL_OPS.events[calendarId]) { CAL_OPS.events[calendarId] = { ...DEFAULT_OPS_ENTRY }; }
+    CAL_OPS.events[calendarId].removed++;
     removed = true;
   } catch (e) {
     if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
@@ -106,7 +107,8 @@ function calInsertEvent(calendarId, event, toleratedErrors = [409]) {
   CAL_OPS.apiCalls[ 'Events.insert' ]++;
   try {
     Calendar.Events.insert(event, calendarId);
-    (CAL_OPS.events[calendarId] ||= { ...DEFAULT_OPS_ENTRY }).added++;
+    if (!CAL_OPS.events[calendarId]) { CAL_OPS.events[calendarId] = { ...DEFAULT_OPS_ENTRY }; }
+    CAL_OPS.events[calendarId].added++;
     inserted = true;
   } catch (e) {
     if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
@@ -130,7 +132,8 @@ function calReplaceEvent(calendarId, event, toleratedErrors = []) {
   CAL_OPS.apiCalls['Events.update']++;
   try {
     Calendar.Events.update(event, calendarId, event.id);
-    (CAL_OPS.events[calendarId] ||= { ...DEFAULT_OPS_ENTRY }).updated++;
+    if (!CAL_OPS.events[calendarId]) { CAL_OPS.events[calendarId] = { ...DEFAULT_OPS_ENTRY }; }
+    CAL_OPS.events[calendarId].updated++;
     replaced = true;
   } catch (e) {
     if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }

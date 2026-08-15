@@ -2,13 +2,13 @@
 //
 // Management of app config and state
 
-  // UserProperties :=
-  //   { syncToken: '{"srcA::dstA":"token1", "srcB::dstA":"token2", ...}, ... }'
-  //   { configHash: '{"srcA::dstA":"hash1", "srcB::dstA":"hash2", ...}, ... }'
-  //   { syncTime: '{"srcA::dstA":1712345678901, ...}, ... }'
-  //
+// UserProperties :=
+//   { syncToken: '{"srcA::dstA":"token1", "srcB::dstA":"token2", ...}, ... }'
+//   { configHash: '{"srcA::dstA":"hash1", "srcB::dstA":"hash2", ...}, ... }'
+//   { syncTime: '{"srcA::dstA":1712345678901, ...}, ... }'
+
 class ScriptProperties {
-  // Not in Google Apps Script; see after class
+  // Not supported in Google Apps Script; see after class
   // static GasUserProperties = null;
   // static ConfigPairStateKey = ['syncToken', ...];
 
@@ -29,7 +29,7 @@ class ScriptProperties {
   update(key, kvObj) {
     for (const attr of ScriptProperties.ConfigPairStateKeys) {
       if (attr in kvObj) {
-        this[attr] ||= {};
+        if (!this[attr]) { this[attr] = {}; }
         if (kvObj[attr] != null) {
           this[attr][key] = kvObj[attr];
         } else {
@@ -45,7 +45,7 @@ class ScriptProperties {
     }
     const props = ScriptProperties.GasUserProperties.getProperties();
     for (const a of ScriptProperties.ConfigPairStateKeys) {
-      props[a] ||= '{}';
+      if (!props[a]) { props[a] = '{}'; }
       props[a] = JSON.parse(props[a]); // XXX try {} catch {}
     }
 
