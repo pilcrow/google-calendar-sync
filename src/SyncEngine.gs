@@ -20,7 +20,7 @@ function _makeDestId(calendarId, baseId, instanceSuffix = '') {
   // naively embed, e.g. base32(calId + '::' + eId).
 
   // FIXME - magic string
-  const destId = 'gcs' + generateMd5Hash(calendarId + '::' + baseId);
+  let destId = 'gcs' + generateMd5Hash(calendarId + '::' + baseId);
   if (instanceSuffix) {
     destId += ('_' + instanceSuffix)
   }
@@ -158,7 +158,7 @@ function _syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
       // source cal?), but same as cancelled parent from our perspective.
       omittedParents.add(sourceEvent.recurringEventId);
       return;
-    } else if (! syncEvent(sourceParent, config, omittedParents)) {
+    } else if (! syncEvent(sourceParent, config, omittedParents, onSync)) {
       // Parent is cancelled or skipped, and calRemoveEvent already called
       // on dest parent replica, which will cascade to children.
       // syncEvent() records the parent in omittedParents itself.
