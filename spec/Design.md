@@ -10,21 +10,37 @@ Authoritative technical reference for the Google Apps Script calendar sync engin
 
 Multiple source calendars sync one-way into one or more destination calendars. Each source→destination pair is configured independently in `CALENDAR_CONFIG`. Pairs are processed sequentially within each trigger execution (`mainLoop` in `src/Main.gs`).
 
+### Namespace Structure
+
+Cross-cutting symbols live under a shared `GCS` namespace root defined in `00Init.gs`:
+
+```javascript
+const GCS = { Config: {}, Utils: {}, Rules: {} };
+```
+
+| Namespace     | Symbols                                                                 |
+|---------------|-------------------------------------------------------------------------|
+| `GCS.Config`  | `ScriptProperties`, `ActiveConfig`, `qualifyConfig`                    |
+| `GCS.Utils`   | `generateMd5Hash`, `SoftTimeoutError`, `scriptTimeCheck`, `isGoogleJsonResponseErr` |
+| `GCS.Rules`   | `evaluateRules`                                                         |
+
+Production engine functions (`_makeDestId`, `buildDestReplica`, `syncEvent`, `mainLoop`, etc.), the `cal*` API wrappers, and all entry points (`main`, `runIntegrationTests`, `itCleanupAll`, `itCleanupCalendars`) remain in the flat global namespace. `CALENDAR_CONFIG` and `00Init.gs` constants also stay flat.
+
 ### File Structure
 
 Apps Script loads project files into a single shared global namespace, so cross-file references are resolved by name. All repository-owned script files use the `.gs` extension, which is part of the deployed project.
 
 | File                | Role                                                                                       |
 |---------------------|--------------------------------------------------------------------------------------------|
-| `00Init.gs`         | Script globals: `SCRIPT_BASETIME`, `SCRIPT_TIMEOUT_MS`, `SCRIPT_LOCK_TIMEOUT_MS`, `STATE_RECLAIM_DAYS` |
-| `AppConfig.gs`      | `ScriptProperties` (UserProperties-backed per-pair state), `qualifyConfig()` (calendar resolution and stale-state dismissal), `ActiveConfig` |
+| `00Init.gs`         | Script globals: `SCRIPT_BASETIME`, `SCRIPT_TIMEOUT_MS`, `SCRIPT_LOCK_TIMEOUT_MS`, `STATE_RECLAIM_DAYS`; `GCS` namespace root |
+| `AppConfig.gs`      | `GCS.Config.ScriptProperties` (UserProperties-backed per-pair state), `GCS.Config.qualifyConfig()` (calendar resolution and stale-state dismissal), `GCS.Config.ActiveConfig` |
 | `CalendarApi.gs`    | `cal*` wrappers over the Calendar v3 API: write pacing, pagination, `syncToken` extraction, API-call accounting (`CAL_OPS`) |
 | `Config.gs`         | Human-editable configuration (gitignored; contains personal calendar IDs)                    |
 | `Config.gs.example` | Committed template; must be kept in structural sync with `Config.gs`                         |
 | `Main.gs`           | Orchestration entry point: `main()`, `mainLoop()`; chooses incremental vs baseline sync      |
 | `SyncEngine.gs`      | Sync engine: `_makeDestId()`, `buildDestReplica()`, `syncEvent()`, `_syncExceptionEvent()`, `syncLoop()`, `initialSync()`, `incrementalSync()` |
-| `RuleEngine.gs`     | `evaluateRules()`                                                                            |
-| `Utils.gs`          | `generateMd5Hash()`, `SoftTimeoutError`, `scriptTimeCheck()`                                 |
+| `RuleEngine.gs`     | `GCS.Rules.evaluateRules()`                                                                    |
+| `Utils.gs`          | `GCS.Utils.generateMd5Hash()`, `GCS.Utils.SoftTimeoutError`, `GCS.Utils.scriptTimeCheck()`, `GCS.Utils.isGoogleJsonResponseErr()` |
 | `appsscript.json`   | Apps Script manifest: V8 runtime, Calendar v3 advanced service, timezone                     |
 
 ### Coding Conventions
@@ -67,7 +83,7 @@ const CALENDAR_CONFIG = [
 
 ## 3. Calendar Reference Resolution
 
-`source` and `destination` may each be a calendar ID or a display name — a calendar's underlying title (`summary`) or its user-set override (`summaryOverride`). A name reference matches a calendar when it equals either field. Resolution happens at runtime in `qualifyConfig()` (`src/AppConfig.gs`).
+`source` and `destination` may each be a calendar ID or a display name — a calendar's underlying title (`summary`) or its user-set override (`summaryOverride`). A name reference matches a calendar when it equals either field. Resolution happens at runtime in `GCS.Config.qualifyConfig()` (`src/AppConfig.gs`).
 
 For each side, the set of candidate IDs is the union of:
 
@@ -92,14 +108,14 @@ A config entry becomes an active pair only when each side resolves to exactly on
 `main()` (`src/Main.gs`):
 
 1. Acquires a lock (`LockService.getUserLock().tryLock(SCRIPT_LOCK_TIMEOUT_MS)`, 30 s). If the lock cannot be acquired, logs at `console.error` and exits.
-2. Loads per-pair state via `ScriptProperties.load()`.
-3. Calls `qualifyConfig(props)` to split `CALENDAR_CONFIG` into active pairs, remembered state (removed pairs still within the `STATE_RECLAIM_DAYS` grace window), and removed (stale-state) pairs (§3).
+2. Loads per-pair state via `GCS.Config.ScriptProperties.load()`.
+3. Calls `GCS.Config.qualifyConfig(props)` to split `CALENDAR_CONFIG` into active pairs, remembered state (removed pairs still within the `STATE_RECLAIM_DAYS` grace window), and removed (stale-state) pairs (§3).
 4. `mainLoop()`:
    - **Dismissal is state-only.** For each removed pair, the stored state keys are cleared. Synced destination replicas are left untouched; they are reconciled by a future baseline sync if the pair is ever re-added (deterministic IDs make that safe).
    - For each active pair, chooses incremental vs baseline sync (§4.2/§4.3) and persists `syncToken`, `configHash`, and `syncTime` for the pair only after its sync completes successfully.
-5. `ScriptProperties.store(props)` persists the updated state; the lock is released, and a final `console.info` reports total elapsed time since `SCRIPT_BASETIME` plus per-endpoint calendar API-call counts.
+5. `GCS.Config.ScriptProperties.store(props)` persists the updated state; the lock is released, and a final `console.info` reports total elapsed time since `SCRIPT_BASETIME` plus per-endpoint calendar API-call counts.
 
-A `SoftTimeoutError` aborts the loop (see §11): the interrupted pair's state is not persisted, so the next run re-syncs it. Any other error propagates out of `mainLoop` (there is no per-pair recovery) and aborts the execution.
+A `GCS.Utils.SoftTimeoutError` aborts the loop (see §11): the interrupted pair's state is not persisted, so the next run re-syncs it. Any other error propagates out of `mainLoop` (there is no per-pair recovery) and aborts the execution.
 
 ### 4.2 Incremental Sync
 
@@ -112,7 +128,7 @@ If no `syncToken` is stored for the pair (first run, new config, or changed conf
 Triggered when the pair has no usable `syncToken`:
 
 - **New config** — no `configHash` recorded yet.
-- **Changed config** — `ActiveConfig` detects `configHash !== hash()` and nulls the stored `syncToken` (it keeps `syncTime`, which the upsert heuristic uses).
+- **Changed config** — `GCS.Config.ActiveConfig` detects `configHash !== hash()` and nulls the stored `syncToken` (it keeps `syncTime`, which the upsert heuristic uses).
 - **Expired token** — incremental sync returned null on `410 fullSyncRequired`.
 
 `initialSync(config, startFrom)` (`src/SyncEngine.gs`):
@@ -136,7 +152,7 @@ Triggered when the pair has no usable `syncToken`:
 `syncEvent(sourceEvent, config, omittedParents, onSync)` (`src/SyncEngine.gs`) processes a single source item:
 
 1. **Loop guard:** If `sourceEvent.extendedProperties?.private?.sourceCalendarId` is set, the item is a sync replica — log a warning and return. (See §10.)
-2. **Time check:** `scriptTimeCheck()`.
+2. **Time check:** `GCS.Utils.scriptTimeCheck()`.
 3. **Exception routing:** If `sourceEvent.recurringEventId` is set, delegate to `_syncExceptionEvent()`.
 4. **Cancellation/skip:** Build the destination replica via `buildDestReplica()`. If its `status` is `cancelled` (source event cancelled, or rule-skipped), remove the destination event by its deterministic ID (`calRemoveEvent`, tolerating 404/410). If the source item was a master (`recurrence` present), record it in `omittedParents` so sibling exceptions are skipped. Otherwise continue to the upsert.
 5. **Upsert** — optimistic, no read-before-write:
@@ -218,7 +234,7 @@ Each exception's summary is evaluated independently — the master's rule result
 
 ## 7. Rule Engine
 
-`evaluateRules(summary, rules)` (`src/RuleEngine.gs`):
+`GCS.Rules.evaluateRules(summary, rules)` (`src/RuleEngine.gs`):
 
 - A missing or `null` summary is treated as `''`.
 - Rules are evaluated in order; the first matching rule wins.
@@ -264,9 +280,9 @@ See §6.2 for suffix derivation (slice, never split).
 
 ## 9. State Management
 
-### ScriptProperties (UserProperties)
+### GCS.Config.ScriptProperties (UserProperties)
 
-State is stored in **three** UserProperties keys, each holding a JSON object keyed by the pair key `srcId::dstId` (see `ScriptProperties`, `src/AppConfig.gs`):
+State is stored in **three** UserProperties keys, each holding a JSON object keyed by the pair key `srcId::dstId` (see `GCS.Config.ScriptProperties`, `src/AppConfig.gs`):
 
 | UserProperties key | Per-pair value                                   |
 |--------------------|--------------------------------------------------|
@@ -276,9 +292,9 @@ State is stored in **three** UserProperties keys, each holding a JSON object key
 
 Keys are literally `sourceCalendarId::destinationCalendarId` (calendar IDs are not URL-encoded in state keys).
 
-**Config hash:** `ActiveConfig.hash()` is `generateMd5Hash(JSON.stringify(this.rules))`. Caution: `JSON.stringify` serializes `RegExp` values as `{}`, so two configs differing only in a regex pattern produce identical hashes — a pure-regex change is not detected as a config change and does not force a baseline sync (see §14).
+**Config hash:** `GCS.Config.ActiveConfig.hash()` is `GCS.Utils.generateMd5Hash(JSON.stringify(this.rules))`. Caution: `JSON.stringify` serializes `RegExp` values as `{}`, so two configs differing only in a regex pattern produce identical hashes — a pure-regex change is not detected as a config change and does not force a baseline sync (see §14).
 
-**State lifecycle** (`qualifyConfig()`):
+**State lifecycle** (`GCS.Config.qualifyConfig()`):
 
 - Active pairs: state is kept and updated after each successful sync.
 - A pair whose config entry is removed or fails to resolve keeps its state for `STATE_RECLAIM_DAYS` (30) after its recorded `syncTime`, giving time to fix a renamed or re-added calendar. After that the state is dismissed — cleared from UserProperties. Replicas are left in place and reconciled by a future baseline sync.
@@ -315,7 +331,7 @@ At the top of `syncEvent()`, if `item.extendedProperties?.private?.sourceCalenda
 - **Lock:** `LockService.getUserLock().tryLock(SCRIPT_LOCK_TIMEOUT_MS)` (30 000 ms) — if another instance holds the lock, `main()` logs at `console.error` and exits.
 - **`SCRIPT_TIMEOUT_MS`** (315 000 ms, "5m 15s") — soft deadline chosen to shut down gracefully inside Apps Script's 6-minute hard limit.
 - **`SCRIPT_BASETIME`** (`src/00Init.gs`) — `Date.now()` captured at module load; the soft deadline is `SCRIPT_BASETIME + SCRIPT_TIMEOUT_MS`.
-- **`scriptTimeCheck()`** (`src/Utils.gs`) — throws `SoftTimeoutError` once `Date.now()` reaches the deadline. Called before each stream and before each event's writes. `main()` catches `SoftTimeoutError`, logs a warning, and exits; the interrupted pair's state is not persisted, so the next run re-syncs it.
+- **`GCS.Utils.scriptTimeCheck()`** (`src/Utils.gs`) — throws `GCS.Utils.SoftTimeoutError` once `Date.now()` reaches the deadline. Called before each stream and before each event's writes. `main()` catches `GCS.Utils.SoftTimeoutError`, logs a warning, and exits; the interrupted pair's state is not persisted, so the next run re-syncs it.
 - **`LOOKBACK_DAYS`** (config, default `SCRIPT_DEFAULT_LOOKBACK_DAYS` = 7) — how far back baseline sync scans (`[now − LOOKBACK_DAYS, ∞)`).
 - **`STATE_RECLAIM_DAYS`** (30) — grace period before stale per-pair state is dismissed.
 - **Write pacing:** `_paceCalendarWrite()` (`src/CalendarApi.gs`) sleeps as needed to guarantee ≥500 ms between write operations (insert/update/remove) on the same calendar. The pacing sleep runs unconditionally and is not skipped when time is short.
@@ -334,7 +350,7 @@ At the top of `syncEvent()`, if `item.extendedProperties?.private?.sourceCalenda
 | `item.status === 'cancelled'` (or rule `skip`)          | Destination replica removed                                         |
 | Unknown source calendar ID in `calStreamEvents()`       | `console.warn("Calendar not found")`, returns null                  |
 | Calendar reference resolution failure                   | `console.warn`, skip the pair, continue                             |
-| `SoftTimeoutError`                                      | Caught in `main()`; loop aborts, state not persisted                |
+| `GCS.Utils.SoftTimeoutError`                              | Caught in `main()`; loop aborts, state not persisted                |
 | Any other error in a pair                               | Propagates; execution aborts (no per-pair recovery)                 |
 
 ---
