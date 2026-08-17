@@ -1,7 +1,7 @@
 // vim: set ft=javascript ts=2 sw=2 et:
 // Main orchestration entry point for calendar synchronization
 
-SCRIPT_DEFAULT_LOOKBACK_DAYS = 7;
+const SCRIPT_DEFAULT_LOOKBACK_DAYS = 7;
 
 /**
  * Entry point for Google Apps Script execution
@@ -15,8 +15,8 @@ function main() {
   }
 
   // Load
-  const props = ScriptProperties.load();
-  const [ active, remembered, removed ] = qualifyConfig(props);
+  const props = GCS.Config.ScriptProperties.load();
+  const [ active, remembered, removed ] = GCS.Config.qualifyConfig(props);
   {
     const nSource = (new Set(active.map(a => a.sourceId))).size;
     const nDest = (new Set(active.map(a => a.destId))).size;
@@ -28,12 +28,12 @@ function main() {
   try {
     mainLoop(props, active, removed);
   } catch (e) {
-    if (! (e instanceof SoftTimeoutError)) { throw e; }
+    if (! (e instanceof GCS.Utils.SoftTimeoutError)) { throw e; }
     console.warn('Soft timeout reached');
   }
 
   // Leave
-  ScriptProperties.store(props);
+  GCS.Config.ScriptProperties.store(props);
   lock.releaseLock();
 
   const callSummary = Object.entries(calApiCallsSnapshot())

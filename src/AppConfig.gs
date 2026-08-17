@@ -7,7 +7,7 @@
 //   { configHash: '{"srcA::dstA":"hash1", "srcB::dstA":"hash2", ...}, ... }'
 //   { syncTime: '{"srcA::dstA":1712345678901, ...}, ... }'
 
-class ScriptProperties {
+GCS.Config.ScriptProperties = class ScriptProperties {
   // Not supported in Google Apps Script; see after class
   // static GasUserProperties = null;
   // static ConfigPairStateKey = ['syncToken', ...];
@@ -61,8 +61,8 @@ class ScriptProperties {
 
 }
 
-ScriptProperties.GasUserProperties = null;
-ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
+GCS.Config.ScriptProperties.GasUserProperties = null;
+GCS.Config.ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
 
 /**
  * Turn CALENDAR_CONFIG and the stored script properties into Active (sync)
@@ -96,7 +96,7 @@ ScriptProperties.ConfigPairStateKeys = ['syncToken', 'configHash', 'syncTime'];
  * @return {[ActiveConfig[], string[], string[]]} [active configs,
  *         remembered state keys (within reclaim window), stale keys to dismiss]
  */
-function qualifyConfig(props) {
+GCS.Config.qualifyConfig = function qualifyConfig(props) {
   const active = [];
   const remembered = [];
   const stale = [];
@@ -157,7 +157,7 @@ function qualifyConfig(props) {
       // Construct an ActiveConfig using the resolved IDs. The constructor can
       // no longer fail on expected inputs (absurd pairs are pre-checked above),
       // so a throw here is a programming error and must propagate.
-      const ac = new ActiveConfig(cc, props, { sourceId, destId });
+      const ac = new GCS.Config.ActiveConfig(cc, props, { sourceId, destId });
       // Defer to the dedup pass below so duplicate (srcId, dstId) pairs are
       // detected before anything is qualified.
       byKey.getOrInsert(ac.key(), []).push(ac);
@@ -208,7 +208,7 @@ function qualifyConfig(props) {
   return [ active, remembered, stale ];
 }
 
-class ActiveConfig {
+GCS.Config.ActiveConfig = class ActiveConfig {
   _shorten(what, length = 11) {
     if (what.length <= length) { return what; } 
     return `${what.slice(0,4)}...${what.slice(-4)}`;
@@ -253,6 +253,6 @@ class ActiveConfig {
   }
 
   hash() {
-    return generateMd5Hash(JSON.stringify(this.rules));
+    return GCS.Utils.generateMd5Hash(JSON.stringify(this.rules));
   }
 }

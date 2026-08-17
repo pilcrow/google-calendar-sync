@@ -9,7 +9,7 @@
  * @param {Array<Object>} rules - Array of rule objects with optional match, skip, prefix, colorId
  * @return {Object} Action object with properties: skip (boolean), prefix (string), colorId (string)
  */
-function evaluateRules(summary, rules) {
+GCS.Rules.evaluateRules = function evaluateRules(summary, rules) {
   if (summary === null || summary === undefined) {
     summary = '';
   }

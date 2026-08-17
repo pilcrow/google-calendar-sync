@@ -59,7 +59,7 @@ function calGetEvent(calendarId, eventId, toleratedErrors = [404]) {
     CAL_OPS.apiCalls[ 'Events.get' ]++;
     return Calendar.Events.get(calendarId, eventId);
   } catch (e) {
-    if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
+    if (! GCS.Utils.isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
   }
   return null;
 }
@@ -84,7 +84,7 @@ function calRemoveEvent(calendarId, eventId, toleratedErrors = [404, 410]) {
     CAL_OPS.events[calendarId].removed++;
     removed = true;
   } catch (e) {
-    if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
+    if (! GCS.Utils.isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
   }
 
   return removed;
@@ -111,7 +111,7 @@ function calInsertEvent(calendarId, event, toleratedErrors = [409]) {
     CAL_OPS.events[calendarId].added++;
     inserted = true;
   } catch (e) {
-    if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
+    if (! GCS.Utils.isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
   }
   return inserted;
 }
@@ -136,7 +136,7 @@ function calReplaceEvent(calendarId, event, toleratedErrors = []) {
     CAL_OPS.events[calendarId].updated++;
     replaced = true;
   } catch (e) {
-    if (! isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
+    if (! GCS.Utils.isGoogleJsonResponseErr(e, ...toleratedErrors)) { throw e; }
   }
   return replaced;
 }
@@ -203,7 +203,7 @@ function calStreamEvents(calendarId, params = {}, callback = null) {
       CAL_OPS.apiCalls['Events.list']++;
       response = Calendar.Events.list(calendarId, searchParams);
     } catch (e) {
-      if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
+      if (! GCS.Utils.isGoogleJsonResponseErr(e, 404)) { throw e; }
       // else bad calendarId
       console.warn(`Calendar not found: ${calendarId}`);
       return null;

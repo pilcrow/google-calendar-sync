@@ -20,7 +20,7 @@ function _makeDestId(calendarId, baseId, instanceSuffix = '') {
   // naively embed, e.g. base32(calId + '::' + eId).
 
   // FIXME - magic string
-  let destId = 'gcs' + generateMd5Hash(calendarId + '::' + baseId);
+  let destId = 'gcs' + GCS.Utils.generateMd5Hash(calendarId + '::' + baseId);
   if (instanceSuffix) {
     destId += ('_' + instanceSuffix)
   }
@@ -37,7 +37,7 @@ function _makeDestId(calendarId, baseId, instanceSuffix = '') {
  * @return {Object} The destination event
  */
 function buildDestReplica(sourceEvent, config) {
-  const rulesResult = evaluateRules(sourceEvent.summary, config.rules);
+  const rulesResult = GCS.Rules.evaluateRules(sourceEvent.summary, config.rules);
 
   const destEvent = {
     summary: (rulesResult.prefix || '') + (sourceEvent.summary || ''),
@@ -146,7 +146,7 @@ function _syncExceptionEvent(sourceEvent, config, omittedParents, onSync) {
   try {
     if (applyException([410])) { return; }
   } catch (e) {
-    if (! isGoogleJsonResponseErr(e, 404)) { throw e; }
+    if (! GCS.Utils.isGoogleJsonResponseErr(e, 404)) { throw e; }
 
     // Parent is missing.  Can happen on a time-windowed Events.list
     // on a first-time sync, where an exception event appears in our
@@ -189,7 +189,7 @@ function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
     return;
   }
 
-  scriptTimeCheck();
+  GCS.Utils.scriptTimeCheck();
 
   if (sourceEvent.recurringEventId) {
     return _syncExceptionEvent(sourceEvent, config, omittedParents, onSync);
@@ -206,13 +206,13 @@ function syncEvent(sourceEvent, config, omittedParents, onSync=null) {
   if (config.syncTime && (Date.parse(sourceEvent.created) <= config.syncTime)) {
     // we likely synced this event previously.  optimistic replace
     if (!calReplaceEvent(config.destId, destEvent, [404])) {
-      scriptTimeCheck();
+      GCS.Utils.scriptTimeCheck();
       calInsertEvent(config.destId, destEvent, []);
     }
   } else {
     // optimistic insert
     if (! calInsertEvent(config.destId, destEvent, [409])) {
-      scriptTimeCheck();
+      GCS.Utils.scriptTimeCheck();
       calReplaceEvent(config.destId, destEvent, []);
     }
   }
@@ -235,7 +235,7 @@ function syncLoop(config, params, onSync = null) {
                             eventTypes: 'default',
                             singleEvents: false };
 
-  scriptTimeCheck();
+  GCS.Utils.scriptTimeCheck();
   return calStreamEvents(config.sourceId, effectiveParams, sourceEvent =>
     syncEvent(sourceEvent, config, omittedParents, onSync)
   );
@@ -260,10 +260,10 @@ function initialSync(config, startFrom) {
 
   const filter = { privateExtendedProperty: 'sourceCalendarId=' + config.sourceId };
 
-  scriptTimeCheck();
+  GCS.Utils.scriptTimeCheck();
   calStreamEvents(config.destId, filter, event => {
     if (! synced.has(event.id)) {
-      scriptTimeCheck();
+      GCS.Utils.scriptTimeCheck();
       calRemoveEvent(config.destId, event.id);
     }
   });
@@ -288,7 +288,7 @@ function incrementalSync(config, syncToken) {
   try {
     return syncLoop(config, params);
   } catch (e) {
-    if (isGoogleJsonResponseErr(e, 410)) {
+    if (GCS.Utils.isGoogleJsonResponseErr(e, 410)) {
       for (const err of (e.details?.errors || [])) {
         if (err.reason === 'fullSyncRequired') {
           return null;

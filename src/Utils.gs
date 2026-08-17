@@ -7,7 +7,7 @@
  * @param {string} text - Input text to hash
  * @return {string} MD5 hash as hexadecimal string
  */
-function generateMd5Hash(text) {
+GCS.Utils.generateMd5Hash = function generateMd5Hash(text) {
   if (text === null || text === undefined) {
     text = '';
   }
@@ -29,7 +29,7 @@ function generateMd5Hash(text) {
  * Error thrown when we reach our soft deadline, giving
  * the script enough time to shut down gracefully.
  */
-class SoftTimeoutError extends Error {
+GCS.Utils.SoftTimeoutError = class SoftTimeoutError extends Error {
   constructor(message, options) {
     super(message, options);
     this.name = this.constructor.name;
@@ -44,12 +44,12 @@ class SoftTimeoutError extends Error {
  *
  * @throws {SoftTimeoutError}
  */
-const scriptTimeCheck = (function() {
+GCS.Utils.scriptTimeCheck = (function() {
   const scriptSoftDeadline = SCRIPT_BASETIME + SCRIPT_TIMEOUT_MS; // 00Init
 
   return function() {
     if (Date.now() >= scriptSoftDeadline) {
-      throw new SoftTimeoutError("Execution deadline reached");
+      throw new GCS.Utils.SoftTimeoutError("Execution deadline reached");
     }
   }
 })();
@@ -62,7 +62,7 @@ const scriptTimeCheck = (function() {
  * @param {number[]} codes - HTTP status codes to match
  * @return {boolean} True if the exception's status code is in `codes`
  */
-function isGoogleJsonResponseErr(e, ...codes) {
+GCS.Utils.isGoogleJsonResponseErr = function isGoogleJsonResponseErr(e, ...codes) {
   return Boolean(
     e?.name === 'GoogleJsonResponseException' &&
     e?.details?.code &&

@@ -14,3 +14,7 @@ const SCRIPT_LOCK_TIMEOUT_MS = 30000;
 // resolves to an active config, giving time to fix a renamed or re-added
 // calendar before the pair's state is dismissed.
 const STATE_RECLAIM_DAYS = 30;
+
+// Namespace root — generic/cross-cutting symbols live here;
+// production engine functions and cal* wrappers stay flat.
+const GCS = { Config: {}, Utils: {}, Rules: {} };
