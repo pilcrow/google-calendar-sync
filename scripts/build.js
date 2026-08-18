@@ -86,7 +86,7 @@ function prepDist() {
 
   const claspConfig = {
     scriptId,
-    rootDir: './publish',
+    rootDir: '.',
     scriptExtensions: ['.js', '.gs'],
     htmlExtensions: ['.html'],
     jsonExtensions: ['.json'],
