@@ -36,7 +36,6 @@ Apps Script loads project files into a single shared global namespace, so cross-
 | `AppConfig.gs`      | `GCS.Config.ScriptProperties` (UserProperties-backed per-pair state), `GCS.Config.qualifyConfig()` (calendar resolution and stale-state dismissal), `GCS.Config.ActiveConfig` |
 | `CalendarApi.gs`    | `cal*` wrappers over the Calendar v3 API: write pacing, pagination, `syncToken` extraction, API-call accounting (`CAL_OPS`) |
 | `Config.gs`         | Human-editable configuration (gitignored; contains personal calendar IDs)                    |
-| `Config.gs.example` | Committed template; must be kept in structural sync with `Config.gs`                         |
 | `Main.gs`           | Orchestration entry point: `main()`, `mainLoop()`; chooses incremental vs baseline sync      |
 | `SyncEngine.gs`      | Sync engine: `_makeDestId()`, `buildDestReplica()`, `syncEvent()`, `_syncExceptionEvent()`, `syncLoop()`, `initialSync()`, `incrementalSync()` |
 | `RuleEngine.gs`     | `GCS.Rules.evaluateRules()`                                                                    |

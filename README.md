@@ -29,10 +29,10 @@ Per-mapping state (sync token, config hash, last sync time) is stored in the scr
 ### 1. Copy and edit the configuration
 
 ```sh
-cp src/Config.gs.example src/Config.gs
+cp envs/prod/Config.gs.example envs/<env>/Config.gs
 ```
 
-Edit `src/Config.gs` to specify your calendars and rules. For example:
+Edit `envs/<env>/Config.gs` to specify your calendars and rules. For example:
 
 ```javascript
 const CALENDAR_CONFIG = [
@@ -48,7 +48,7 @@ const CALENDAR_CONFIG = [
 ];
 ```
 
-Optional overrides (shown commented out in `src/Config.gs.example`):
+Optional overrides (shown commented out in `envs/prod/Config.gs.example`):
 
 - `API_PAGE_SIZE` — events fetched per API request (default 250)
 - `LOOKBACK_DAYS` — how far back a baseline sync looks (default 7)
@@ -81,10 +81,10 @@ Optional overrides (shown commented out in `src/Config.gs.example`):
 
 ### 2. Deploy to Apps Script
 
-**Using clasp (recommended):**
+**Using npm + clasp (recommended):**
 
 ```sh
-clasp push
+npm run push <env>
 ```
 
 **Using the Apps Script IDE:** Create a script file for each `src/*.gs` file and paste in the contents.
