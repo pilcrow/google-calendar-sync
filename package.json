@@ -1,0 +1,13 @@
+{
+  "name": "google-calendar-sync",
+  "version": "0.9.0",
+  "description": "One-way Google Calendar synchronization via Google Apps Script",
+  "scripts": {
+    "prep-dist": "node scripts/build.js prep-dist",
+    "push": "node scripts/build.js push",
+    "clean": "node scripts/build.js clean"
+  },
+  "devDependencies": {
+    "@google/clasp": "^2.4.2"
+  }
+}
