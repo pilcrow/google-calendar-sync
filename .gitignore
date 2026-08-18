@@ -1,5 +1,10 @@
 .clasprc.json
+.clasp.json
+publish/
 src/Config.gs
+envs/*/Config.gs
+envs/*/scriptId
+envs/*/TestConfig.gs
 *.swp
 spec/Review-Plan.md
 spec/Retrospective-*.md
