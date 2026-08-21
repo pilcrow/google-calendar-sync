@@ -39,6 +39,26 @@ function itAssert(cond, msg) {
   if (!cond) { throw new Error('ASSERT FAILED: ' + msg); }
 }
 
+function itJson(value) {
+  try { return JSON.stringify(value); } catch (e) { return String(value); }
+}
+
+function itExceptionDetails(e) {
+  const details = {
+    name: e && e.name,
+    message: e && e.message,
+    stack: e && e.stack,
+    string: String(e)
+  };
+  try {
+    for (const key of Object.getOwnPropertyNames(e)) {
+      if (!(key in details)) { details[key] = e[key]; }
+    }
+  } catch (ignored) {}
+  details.json = itJson(e);
+  return itJson(details);
+}
+
 function itTest(title, fn) {
   console.log('==== ' + title + ' ====');
   try {
@@ -46,7 +66,8 @@ function itTest(title, fn) {
     console.log('  PASS');
   } catch (e) {
     itFailures++;
-    console.error('  FAIL: ' + e.message);
+    console.error('  FAIL: ' + (e && e.message ? e.message : String(e)));
+    console.error('  EXCEPTION: ' + itExceptionDetails(e));
   }
 }
 
@@ -105,11 +126,60 @@ function itLookbackDays() {
 
 function itDaysAgo(n) { return new Date(Date.now() - n * IT_DAY); }
 function itDaysAhead(n) { return new Date(Date.now() + n * IT_DAY); }
-function itMs(iso) { return new Date(iso).getTime(); }
 function itFmtUTC(d) { return Utilities.formatDate(d, 'UTC', "yyyyMMdd'T'HHmmss'Z'"); }
 
 function itNextEventId() {
   return IT_EVENT_ID_PREFIX + String(Date.now()) + String(itSeq++);
+}
+
+function itCalEventsCall(operation, args, logFailure = true) {
+  const fn = Calendar.Events[operation];
+  if (! (typeof fn === 'function')) {
+    throw new Error('Unrecognized Calendar.Events requested: ' + operation);
+  }
+  console.log('Calendar.Events.' + operation + ' ' + itJson(args));
+  try {
+   return fn(...args);
+  } catch (e) {
+    if (logFailure !== false) {
+      console.error('Calendar.Events.' + operation + ' failed: ' + itJson(args));
+      console.error('Calendar.Events.' + operation + ' exception: ' + itExceptionDetails(e));
+    }
+    throw e;
+  }
+}
+
+function itCalEventsGet(calendarId, eventId, logFailure) {
+  return itCalEventsCall('get', [calendarId, eventId], logFailure);
+}
+
+function itCalEventsList(calendarId, params, logFailure) {
+  return itCalEventsCall('list', [calendarId, params], logFailure);
+}
+
+function itCalEventsInsert(resource, calendarId, logFailure) {
+  return itCalEventsCall('insert', [resource, calendarId], logFailure);
+}
+
+function itCalEventsUpdate(resource, calendarId, eventId, logFailure) {
+  return itCalEventsCall('update', [resource, calendarId, eventId], logFailure);
+}
+
+function itCalEventsRemove(calendarId, eventId, logFailure) {
+  return itCalEventsCall('remove', [calendarId, eventId], logFailure);
+}
+
+function itEpochSecond(value) {
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : NaN;
+}
+
+function itAssertTime(start, expectedIso, msg) {
+  const actualIso = start && start.dateTime;
+  const expectedSecond = itEpochSecond(expectedIso);
+  const actualSecond = itEpochSecond(actualIso);
+  const matches = actualIso && actualSecond === expectedSecond;
+  itAssert(matches, msg + ' expected=' + expectedIso + ' actual=' + itJson(start));
 }
 
 function itCreateEvent(calId, spec) {
@@ -123,18 +193,26 @@ function itCreateEvent(calId, spec) {
   if (spec.description != null) { resource.description = spec.description; }
   if (spec.location != null) { resource.location = spec.location; }
   if (spec.extendedProperties != null) { resource.extendedProperties = spec.extendedProperties; }
-  return Calendar.Events.insert(resource, calId);
+  return itCalEventsInsert(resource, calId);
 }
 
 function itReschedule(sourceId, master, origStart, newStart, summary) {
   const instanceId = master.id + '_' + itFmtUTC(origStart);
-  const fetched = Calendar.Events.get(sourceId, instanceId);
+  console.log('itReschedule context ' + itJson({
+    sourceId: sourceId,
+    masterId: master.id,
+    instanceId: instanceId,
+    originalStart: origStart.toISOString(),
+    newStart: newStart.toISOString(),
+    summary: summary
+  }));
+  const fetched = itCalEventsGet(sourceId, instanceId);
   const body = Object.assign({}, fetched, {
     summary: summary,
     start: { dateTime: newStart.toISOString(), timeZone: 'UTC' },
     end: { dateTime: new Date(newStart.getTime() + IT_HOUR).toISOString(), timeZone: 'UTC' }
   });
-  return Calendar.Events.update(body, sourceId, instanceId);
+  return itCalEventsUpdate(body, sourceId, instanceId);
 }
 
 function itRunSync(props, sourceId, destId, rules) {
@@ -152,7 +230,7 @@ function itListDestReplicas(destId, srcId) {
     maxResults: 250
   };
   do {
-    const res = Calendar.Events.list(destId, searchParams);
+    const res = itCalEventsList(destId, searchParams);
     if (res.items) { items.push(...res.items); }
     searchParams.pageToken = res.nextPageToken;
   } while (searchParams.pageToken);
@@ -161,7 +239,7 @@ function itListDestReplicas(destId, srcId) {
 
 function itGetEvent(calId, eventId) {
   try {
-    return Calendar.Events.get(calId, eventId);
+    return itCalEventsGet(calId, eventId, false);
   } catch (e) {
     return null;
   }
@@ -180,14 +258,14 @@ function itCleanupPair(destId, srcId) {
   const items = itListDestReplicas(destId, srcId);
   items.sort((a, b) => (b.recurrence ? 1 : 0) - (a.recurrence ? 1 : 0));
   for (const ev of items) {
-    try { Calendar.Events.remove(destId, ev.id); } catch (e) { }
+    try { itCalEventsRemove(destId, ev.id, false); } catch (e) { }
   }
 }
 
 function itCleanupSourceEvents(srcId, events) {
   for (const ev of events) {
     if (!ev) { continue; }
-    try { Calendar.Events.remove(srcId, ev.id); } catch (e) { }
+    try { itCalEventsRemove(srcId, ev.id, false); } catch (e) { }
   }
 }
 
@@ -200,10 +278,10 @@ function itSweepSourceFixtures(srcId) {
     maxResults: 250
   };
   do {
-    const res = Calendar.Events.list(srcId, searchParams);
+    const res = itCalEventsList(srcId, searchParams);
     for (const ev of (res.items || [])) {
       if (String(ev.id).indexOf(IT_EVENT_ID_PREFIX) === 0) {
-        try { Calendar.Events.remove(srcId, ev.id); } catch (e) { }
+        try { itCalEventsRemove(srcId, ev.id, false); } catch (e) { }
       }
     }
     searchParams.pageToken = res.nextPageToken;
@@ -242,8 +320,8 @@ function testInsert({ sourceId, destId, props }) {
     const r = replicas[0];
     itAssert(r.id === _makeDestId(sourceId, ev.id), 'deterministic dest id');
     itAssert(r.summary === 'Team Lunch', 'summary copied');
-    itAssert(itMs(r.start.dateTime) === itMs(ev.start.dateTime), 'start preserved');
-    itAssert(itMs(r.end.dateTime) === itMs(ev.end.dateTime), 'end preserved');
+    itAssertTime(r.start, ev.start.dateTime, 'start preserved');
+    itAssertTime(r.end, ev.end.dateTime, 'end preserved');
     itAssert(r.extendedProperties?.private?.sourceCalendarId === sourceId, 'tag: source');
     itAssert(r.extendedProperties?.private?.sourceEventId === ev.id, 'tag: event');
 
@@ -275,9 +353,9 @@ function testUpdate({ sourceId, destId, props }) {
     itAssert(before.length === 1, 'baseline replica');
     const replicaId = before[0].id;
 
-    const fresh = Calendar.Events.get(sourceId, ev.id);
+    const fresh = itCalEventsGet(sourceId, ev.id);
     const newStart = new Date(start.getTime() + 2 * IT_HOUR);
-    Calendar.Events.update(Object.assign({}, fresh, {
+    itCalEventsUpdate(Object.assign({}, fresh, {
       summary: 'Planning v2',
       description: 'v2',
       location: 'Room B',
@@ -294,7 +372,7 @@ function testUpdate({ sourceId, destId, props }) {
     itAssert(after[0].summary === 'Planning v2', 'summary updated');
     itAssert(after[0].description === 'v2', 'description updated');
     itAssert(after[0].location === 'Room B', 'location updated');
-    itAssert(itMs(after[0].start.dateTime) === itMs(newStart.toISOString()), 'start updated');
+    itAssertTime(after[0].start, newStart.toISOString(), 'start updated');
 
     const ops = calOpsSince(destId, beforeOps);
     itAssert(ops.added === 0, 'no inserts on update');
@@ -319,7 +397,7 @@ function testDelete({ sourceId, destId, props }) {
     itRunSync(props, sourceId, destId, []);
     itAssert(itListDestReplicas(destId, sourceId).length === 1, 'baseline replica');
 
-    Calendar.Events.remove(sourceId, ev.id);
+    itCalEventsRemove(sourceId, ev.id);
     const beforeOps = calOpsSnapshot(destId);
     itRunSync(props, sourceId, destId, []);
 
@@ -410,7 +488,7 @@ function testSpanningEvent({ sourceId, destId, props }) {
 
     const replicas = itListDestReplicas(destId, sourceId);
     itAssert(replicas.length === 1, 'window-spanning event synced, got ' + replicas.length);
-    itAssert(itMs(replicas[0].start.dateTime) === itMs(start.toISOString()), 'start preserved');
+    itAssertTime(replicas[0].start, start.toISOString(), 'start preserved');
   } finally {
     itTearDown(sourceId, destId, fixtures);
   }
@@ -596,7 +674,7 @@ function testExceptionUpdate({ sourceId, destId, props }) {
     const inst = itGetEvent(destId, masterId + '_' + itFmtUTC(origStart));
     itAssert(inst && inst.status !== 'cancelled', 'exception materialized on dest');
     itAssert(inst.summary === 'Rescheduled', 'exception summary applied');
-    itAssert(itMs(inst.start.dateTime) === itMs(newStart.toISOString()), 'exception time applied');
+    itAssertTime(inst.start, newStart.toISOString(), 'exception time applied');
     itAssert(itGetEvent(destId, masterId)?.status === 'confirmed', 'master intact');
   } finally {
     itTearDown(sourceId, destId, fixtures);
@@ -621,8 +699,8 @@ function testExceptionCancel({ sourceId, destId, props }) {
 
     const origStart = new Date(start.getTime() + 2 * IT_DAY);
     const srcInstanceId = master.id + '_' + itFmtUTC(origStart);
-    const fetched = Calendar.Events.get(sourceId, srcInstanceId);
-    Calendar.Events.update(Object.assign({}, fetched, { status: 'cancelled' }), sourceId, srcInstanceId);
+    const fetched = itCalEventsGet(sourceId, srcInstanceId);
+    itCalEventsUpdate(Object.assign({}, fetched, { status: 'cancelled' }), sourceId, srcInstanceId);
 
     itRunSync(props, sourceId, destId, []);
 
@@ -652,7 +730,7 @@ function testExceptionBeforeMaster({ sourceId, destId, props }) {
     const masterId = _makeDestId(sourceId, master.id);
     itAssert(itGetEvent(destId, masterId), 'master present after baseline');
 
-    Calendar.Events.remove(destId, masterId);
+    itCalEventsRemove(destId, masterId);
 
     const origStart = new Date(start.getTime() + 1 * IT_DAY);
     const newStart = new Date(origStart.getTime() + 2 * IT_HOUR);
@@ -698,7 +776,7 @@ function testRecurringExceptionInWindowOnly({ sourceId, destId, props }) {
     itAssert(masterEv && masterEv.status === 'confirmed', 'master pulled in despite pre-window series');
     const inst = itGetEvent(destId, masterId + '_' + itFmtUTC(origStart));
     itAssert(inst && inst.summary === 'In-window exception', 'exception materialized');
-    itAssert(itMs(inst.start.dateTime) === itMs(newStart.toISOString()), 'exception at new time');
+    itAssertTime(inst.start, newStart.toISOString(), 'exception at new time');
   } finally {
     itTearDown(sourceId, destId, fixtures);
   }
@@ -726,7 +804,7 @@ function testIncrementalExceptionsBothSides({ sourceId, destId, props }) {
     const i0New = new Date(i0Orig.getTime() + 2 * IT_HOUR);
     itReschedule(sourceId, master, i0Orig, i0New, 'Early exception');
 
-    const midOrig = itDaysAhead(2);
+    const midOrig = new Date(start.getTime() + (L + 4) * IT_DAY);
     const midNew = new Date(midOrig.getTime() + 2 * IT_HOUR);
     itReschedule(sourceId, master, midOrig, midNew, 'Late exception');
 
@@ -734,10 +812,10 @@ function testIncrementalExceptionsBothSides({ sourceId, destId, props }) {
 
     const early = itGetEvent(destId, masterId + '_' + itFmtUTC(i0Orig));
     itAssert(early && early.summary === 'Early exception', 'pre-window exception pulled in');
-    itAssert(itMs(early.start.dateTime) === itMs(i0New.toISOString()), 'pre-window exception time');
+    itAssertTime(early.start, i0New.toISOString(), 'pre-window exception time');
     const late = itGetEvent(destId, masterId + '_' + itFmtUTC(midOrig));
     itAssert(late && late.summary === 'Late exception', 'post-window exception pulled in');
-    itAssert(itMs(late.start.dateTime) === itMs(midNew.toISOString()), 'post-window exception time');
+    itAssertTime(late.start, midNew.toISOString(), 'post-window exception time');
     itAssert(itGetEvent(destId, masterId)?.status === 'confirmed', 'master intact');
   } finally {
     itTearDown(sourceId, destId, fixtures);
@@ -762,7 +840,7 @@ function testMasterDeletedDuringIncremental({ sourceId, destId, props }) {
     itAssert(itGetEvent(destId, masterId), 'master present');
 
     const beforeOps = calOpsSnapshot(destId);
-    Calendar.Events.remove(sourceId, master.id);
+    itCalEventsRemove(sourceId, master.id);
     itRunSync(props, sourceId, destId, []);
 
     const masterEv = itGetEvent(destId, masterId);
