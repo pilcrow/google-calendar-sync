@@ -8,8 +8,11 @@ const SCRIPT_DEFAULT_LOOKBACK_DAYS = 7;
  */
 function main() {
   // Lock
+  const lockStarted = Date.now();
   const lock = LockService.getUserLock();
-  if (! lock.tryLock(SCRIPT_LOCK_TIMEOUT_MS)) {
+  const lockAcquired = lock.tryLock(SCRIPT_LOCK_TIMEOUT_MS);
+  SCRIPT_TIMINGS.lockMs = Date.now() - lockStarted;
+  if (! lockAcquired) {
     console.error('Could not acquire script lock - exiting');
     return;
   }
@@ -39,7 +42,11 @@ function main() {
   const callSummary = Object.entries(calApiCallsSnapshot())
     .map(([name, count]) => `${name}=${count}`)
     .join(', ');
-  console.info(`Done in ${Date.now() - SCRIPT_BASETIME}ms; API calls: ${callSummary}`);
+  const timingSummary = `lock=${SCRIPT_TIMINGS.lockMs}ms, ` +
+    `load=${SCRIPT_TIMINGS.propertiesLoadMs}ms, ` +
+    `store=${SCRIPT_TIMINGS.propertiesStoreMs}ms`;
+  console.info(`Done in ${Date.now() - SCRIPT_BASETIME}ms; ` +
+    `API calls: ${callSummary}; timing: ${timingSummary}`);
 }
 
 function mainLoop(props, active, removed) {

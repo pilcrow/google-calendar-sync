@@ -2,6 +2,11 @@
 
 // Load bearing in timeCheck; ala perl's $^T
 const SCRIPT_BASETIME = Date.now();
+const SCRIPT_TIMINGS = {
+  lockMs: 0,
+  propertiesLoadMs: 0,
+  propertiesStoreMs: 0
+};
 
 // Gracefully shutdown after 5m 15s execution
 // (Google free environment provides 6m execution)

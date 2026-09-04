@@ -40,23 +40,33 @@ GCS.Config.ScriptProperties = class ScriptProperties {
   }
 
   static load() {
-    if (!ScriptProperties.GasUserProperties) {
-      ScriptProperties.GasUserProperties = PropertiesService.getUserProperties();
-    }
-    const props = ScriptProperties.GasUserProperties.getProperties();
-    for (const a of ScriptProperties.ConfigPairStateKeys) {
-      if (!props[a]) { props[a] = '{}'; }
-      props[a] = JSON.parse(props[a]); // XXX try {} catch {}
-    }
+    const started = Date.now();
+    try {
+      if (!ScriptProperties.GasUserProperties) {
+        ScriptProperties.GasUserProperties = PropertiesService.getUserProperties();
+      }
+      const props = ScriptProperties.GasUserProperties.getProperties();
+      for (const a of ScriptProperties.ConfigPairStateKeys) {
+        if (!props[a]) { props[a] = '{}'; }
+        props[a] = JSON.parse(props[a]); // XXX try {} catch {}
+      }
 
-    return new ScriptProperties(props);
+      return new ScriptProperties(props);
+    } finally {
+      SCRIPT_TIMINGS.propertiesLoadMs = Date.now() - started;
+    }
   }
 
   static store(props) {
-    for (const a of ScriptProperties.ConfigPairStateKeys) {
-      props[a] = JSON.stringify(props[a] || {});
+    const started = Date.now();
+    try {
+      for (const a of ScriptProperties.ConfigPairStateKeys) {
+        props[a] = JSON.stringify(props[a] || {});
+      }
+      ScriptProperties.GasUserProperties.setProperties(props);
+    } finally {
+      SCRIPT_TIMINGS.propertiesStoreMs = Date.now() - started;
     }
-    ScriptProperties.GasUserProperties.setProperties(props);
   }
 
 }
