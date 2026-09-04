@@ -219,9 +219,9 @@ GCS.Config.qualifyConfig = function qualifyConfig(props) {
 }
 
 GCS.Config.ActiveConfig = class ActiveConfig {
-  _shorten(what, length = 11) {
-    if (what.length <= length) { return what; } 
-    return `${what.slice(0,4)}...${what.slice(-4)}`;
+  _shorten(what) {
+    if (what.length <= 11) { return what; }
+    return `${what.slice(0,8)}...`;
   }
 
   key() {
