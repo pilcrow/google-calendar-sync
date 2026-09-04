@@ -58,26 +58,29 @@ function mainLoop(props, active, removed) {
   }
 
   for (const c of active) {
-    const started = Date.now();
-    const opsBefore = calOpsSnapshot(c.destId);
-    const summarizePair = () => {
-      const ops = calOpsSince(c.destId, opsBefore);
-      console.info(`Finished ${c.summarize()} in ${Date.now() - started}ms: ` +
-        `+${ops.added} -${ops.removed} ~${ops.updated}`);
-    };
+    syncPair(props, c);
+  }
+}
 
+function syncPair(props, c) {
+  const started = Date.now();
+  const opsBefore = calOpsSnapshot(c.destId);
+  let mode;
+  let why;
+  let result = 'ERR';
+
+  try {
     let nextSyncToken = null;
-    let why;
 
     if (c.syncToken) {
-      console.info(`Begin incremental sync ${c.summarize()}`);
+      mode = 'incremental';
       nextSyncToken = incrementalSync(c, c.syncToken);
       if (nextSyncToken) {
         props.update(c.key(), { syncToken: nextSyncToken,
                           configHash: c.hash(),
                           syncTime: Date.now() });
-        summarizePair();
-        continue;
+        result = 'OK';
+        return;
       }
 
       console.info(`Incremental unsuccessful, falling back to baseline sync`);
@@ -88,16 +91,24 @@ function mainLoop(props, active, removed) {
       why = 'new config';
     }
 
+    mode = 'baseline';
     const lookbackDays = (typeof LOOKBACK_DAYS !== 'undefined' ? LOOKBACK_DAYS : SCRIPT_DEFAULT_LOOKBACK_DAYS);
     const startWhen = new Date();
     startWhen.setDate(startWhen.getDate() - lookbackDays);
-    console.info(`Begin baseline sync (${why}) ${c.summarize()}, looking back ${lookbackDays} to ${startWhen.toISOString()}`);
     nextSyncToken = initialSync(c, startWhen.toISOString());
     if (nextSyncToken) {
       props.update(c.key(), { syncToken: nextSyncToken,
                         configHash: c.hash(),
                         syncTime: Date.now() });
     }
-    summarizePair();
+    result = 'OK';
+  } catch (e) {
+    console.error(e);
+    throw e;
+  } finally {
+    const ops = calOpsSince(c.destId, opsBefore);
+    const detail = `${mode}${why ? ` (${why})` : ''}`;
+    console.info(`${c.summarize()} {${detail}} ${result} ${Date.now() - started}ms: ` +
+      `+${ops.added} -${ops.removed} ~${ops.updated}`);
   }
 }
