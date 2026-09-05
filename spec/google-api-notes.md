@@ -6,11 +6,13 @@ These notes are intentionally non-authoritative. Quotas and limits can vary by a
 
 ## Constraints this project is built around
 
-1. Apps Script executions have a hard runtime limit; this project targets a 5-minute safety budget (`EXECUTION_TIMEOUT_MS`) inside that limit.
-2. Only one orchestration run should operate at a time (`LockService.getScriptLock()`).
-3. Calendar writes are paced (`WRITE_PACING_DELAY_MS`) to reduce quota pressure.
-4. Incremental sync relies on `syncToken`; token expiration (`HTTP 410`) triggers reconciliation.
-5. `singleEvents` must stay `false` on `Events.list` calls so incremental sync remains supported.
+1. Apps Script executions have a hard runtime limit; free Google Workspace/Apps Script runs are commonly capped at about six minutes, while paid Workspace editions can allow about 30 minutes. This project targets a 5-minute safety budget (`EXECUTION_TIMEOUT_MS`) inside that limit.
+2. Triggered executions can suffer a cold-start delay before the script body begins running. In our observations, startup is typically under 1 second, almost always under 10 seconds, and occasionally as high as about 40 seconds.
+3. Some runs do not execute at all because Google returns a server-side execution error before the script starts. In one observed case, an execution lasted about eight minutes and logged only `"We're sorry, a server error occurred. Please wait a bit and try again."` This is infrastructure/platform failure, not a project-level timeout.
+4. Only one orchestration run should operate at a time (`LockService.getScriptLock()`).
+5. Calendar writes are paced (`WRITE_PACING_DELAY_MS`) to reduce quota pressure.
+6. Incremental sync relies on `syncToken`; token expiration (`HTTP 410`) triggers reconciliation.
+7. `singleEvents` must stay `false` on `Events.list` calls so incremental sync remains supported.
 
 See `spec/Design.md` for implementation-level behavior and invariants.
 
