@@ -112,7 +112,7 @@ function syncPair(props, c) {
   } finally {
     const ops = calOpsSince(c.destId, opsBefore);
     const detail = `${mode}${why ? ` (${why})` : ''}`;
-    console.info(`${c.summarize()} {${detail}} ${result} ${Date.now() - started}ms: ` +
+    console.info(`${c.summarize()} ${detail} ${result} ${Date.now() - started}ms: ` +
       `+${ops.added} -${ops.removed} ~${ops.updated}`);
   }
 }
