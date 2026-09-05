@@ -28,11 +28,14 @@ function main() {
   }
 
   // Loop
+  const syncStarted = Date.now();
   try {
     mainLoop(props, active, removed);
   } catch (e) {
     if (! (e instanceof GCS.Utils.SoftTimeoutError)) { throw e; }
     console.warn('Soft timeout reached');
+  } finally {
+    SCRIPT_TIMINGS.syncMs = Date.now() - syncStarted;
   }
 
   // Leave
@@ -44,6 +47,7 @@ function main() {
     .join(', ');
   const timingSummary = `lock=${SCRIPT_TIMINGS.lockMs}ms, ` +
     `load=${SCRIPT_TIMINGS.propertiesLoadMs}ms, ` +
+    `sync=${SCRIPT_TIMINGS.syncMs}ms, ` +
     `store=${SCRIPT_TIMINGS.propertiesStoreMs}ms`;
   console.info(`Done in ${Date.now() - SCRIPT_BASETIME}ms; ` +
     `API calls: ${callSummary}; timing: ${timingSummary}`);

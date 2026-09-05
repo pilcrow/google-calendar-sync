@@ -5,6 +5,7 @@ const SCRIPT_BASETIME = Date.now();
 const SCRIPT_TIMINGS = {
   lockMs: 0,
   propertiesLoadMs: 0,
+  syncMs: 0,
   propertiesStoreMs: 0
 };
 
